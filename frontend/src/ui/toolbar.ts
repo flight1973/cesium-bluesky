@@ -158,7 +158,7 @@ export class BlueSkyToolbar extends LitElement {
       <button
         class=${this.showPz ? '' : 'off'}
         @click=${this._togglePz}
-      >SEP RING</button>
+      >PZ RING</button>
       <button
         class=${this.showAirports ? '' : 'off'}
         @click=${this._toggleAirports}
