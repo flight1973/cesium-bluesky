@@ -1,11 +1,36 @@
 """WebSocket connection manager with topic-based subscriptions."""
 import logging
+import math
 
 import orjson
 from fastapi import WebSocket
 from starlette.websockets import WebSocketState
 
 logger = logging.getLogger(__name__)
+
+
+def _json_default(obj: object) -> object:
+    """Fallback serializer for orjson.
+
+    Converts NaN/Inf floats to None and numpy scalars
+    to native Python types.
+    """
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if hasattr(obj, 'item'):  # numpy scalar
+        val = obj.item()
+        if isinstance(val, float):
+            if math.isnan(val) or math.isinf(val):
+                return None
+        return val
+    if hasattr(obj, 'tolist'):  # numpy array
+        return obj.tolist()
+    raise TypeError(
+        f'Object of type {type(obj).__name__} '
+        'is not JSON serializable'
+    )
 
 
 class ConnectionManager:
@@ -74,15 +99,30 @@ class ConnectionManager:
         if not self._connections:
             return
 
-        msg = orjson.dumps({"topic": topic, "data": data})
+        try:
+            msg = orjson.dumps(
+                {"topic": topic, "data": data},
+                option=(
+                    orjson.OPT_SERIALIZE_NUMPY
+                    | orjson.OPT_NON_STR_KEYS
+                ),
+                default=_json_default,
+            )
+        except (TypeError, ValueError) as exc:
+            logger.warning(
+                "Serialization failed for %s: %s",
+                topic, exc,
+            )
+            return
+
         disconnected: list[WebSocket] = []
         for ws, subs in self._connections.items():
             if topic not in subs:
                 continue
             try:
                 await ws.send_bytes(msg)
-            except RuntimeError:
-                # Client disconnected during send.
+            except Exception:  # pylint: disable=broad-except
+                # Client disconnected mid-send.
                 disconnected.append(ws)
         for ws in disconnected:
             self.disconnect(ws)

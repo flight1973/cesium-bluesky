@@ -110,7 +110,7 @@ async function clearSimState(): Promise<void> {
   routeMgr.clear();
   acPanel.hide();
   fmsPanel.close();
-  aircraftMgr.select(null);
+  aircraftMgr.clearAll();
 
   // Clear the rendered area boundaries immediately.
   areaMgr.clear();

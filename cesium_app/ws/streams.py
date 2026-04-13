@@ -104,34 +104,43 @@ async def broadcast_loop(app: FastAPI) -> None:
     while True:
         await asyncio.sleep(0.05)  # 20 Hz poll
 
-        if manager.client_count == 0:
-            continue
+        try:
+            if manager.client_count == 0:
+                continue
 
-        latest = collector.get_latest()
+            latest = collector.get_latest()
 
-        # ACDATA -- 5 Hz
-        if (
-            latest["acdata_seq"] != _last_acdata_seq
-            and latest["acdata"] is not None
-        ):
-            _last_acdata_seq = latest["acdata_seq"]
-            await manager.broadcast(
-                "ACDATA", latest["acdata"],
+            # ACDATA -- 5 Hz
+            if (
+                latest["acdata_seq"] != _last_acdata_seq
+                and latest["acdata"] is not None
+            ):
+                _last_acdata_seq = latest["acdata_seq"]
+                await manager.broadcast(
+                    "ACDATA", latest["acdata"],
+                )
+
+            # SIMINFO -- 1 Hz
+            if (
+                latest["siminfo_seq"] != _last_siminfo_seq
+                and latest["siminfo"] is not None
+            ):
+                _last_siminfo_seq = latest["siminfo_seq"]
+                await manager.broadcast(
+                    "SIMINFO", latest["siminfo"],
+                )
+
+            # TRAILS -- 1 Hz (consume to clear)
+            if latest["trails_seq"] != _last_trails_seq:
+                _last_trails_seq = latest["trails_seq"]
+                trails = collector.consume_trails()
+                if trails:
+                    await manager.broadcast(
+                        "TRAILS", trails,
+                    )
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.error(
+                "Broadcast loop iteration failed: %s",
+                exc,
+                exc_info=True,
             )
-
-        # SIMINFO -- 1 Hz
-        if (
-            latest["siminfo_seq"] != _last_siminfo_seq
-            and latest["siminfo"] is not None
-        ):
-            _last_siminfo_seq = latest["siminfo_seq"]
-            await manager.broadcast(
-                "SIMINFO", latest["siminfo"],
-            )
-
-        # TRAILS -- 1 Hz (consume to clear)
-        if latest["trails_seq"] != _last_trails_seq:
-            _last_trails_seq = latest["trails_seq"]
-            trails = collector.consume_trails()
-            if trails:
-                await manager.broadcast("TRAILS", trails)

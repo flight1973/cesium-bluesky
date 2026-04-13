@@ -358,6 +358,15 @@ export class AircraftManager {
     return this.entities.size;
   }
 
+  /** Remove all aircraft entities (for RESET / IC). */
+  clearAll(): void {
+    const ids = Array.from(this.entities.keys());
+    for (const acid of ids) {
+      this._removeAircraft(acid);
+    }
+    this.selectedAcid = null;
+  }
+
   private _removeAircraft(acid: string): void {
     const entity = this.entities.get(acid);
     if (entity) {
