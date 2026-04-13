@@ -19,6 +19,7 @@ export class BlueSkyToolbar extends LitElement {
   @state() showAirports = true;
   @state() showWaypoints = false;
   @state() showLeaders = true;
+  @state() showPz = false;
   @state() is3D = true;
   @state() altScale = 10;
 
@@ -155,6 +156,10 @@ export class BlueSkyToolbar extends LitElement {
         @click=${this._toggleLeaders}
       >VEL VECTOR</button>
       <button
+        class=${this.showPz ? '' : 'off'}
+        @click=${this._togglePz}
+      >SEP RING</button>
+      <button
         class=${this.showAirports ? '' : 'off'}
         @click=${this._toggleAirports}
       >APT</button>
@@ -279,6 +284,20 @@ export class BlueSkyToolbar extends LitElement {
     this.dispatchEvent(
       new CustomEvent('toggle-view', {
         detail: { is3D: this.is3D },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  private _togglePz(): void {
+    this.showPz = !this.showPz;
+    this.dispatchEvent(
+      new CustomEvent('toggle-layer', {
+        detail: {
+          layer: 'pz',
+          visible: this.showPz,
+        },
         bubbles: true,
         composed: true,
       }),

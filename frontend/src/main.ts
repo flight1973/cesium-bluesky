@@ -275,6 +275,9 @@ document.addEventListener(
       case 'leaders':
         aircraftMgr.setLeadersVisible(visible);
         break;
+      case 'pz':
+        aircraftMgr.setPzVisible(visible);
+        break;
       case 'airports':
         navMgr.setAirportsVisible(visible);
         break;

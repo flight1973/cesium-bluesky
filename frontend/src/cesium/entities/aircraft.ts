@@ -75,14 +75,20 @@ function velocityEndpoint(
 // Color for CPA conflict lines.
 const COLOR_CPA_LINE = Color.ORANGE.withAlpha(0.6);
 
+// Separation ring color.
+const COLOR_PZ = new Color(0, 1, 0, 0.25);
+const COLOR_PZ_CONFLICT = new Color(1, 0.6, 0, 0.35);
+
 export class AircraftManager {
   private entities = new Map<string, Entity>();
   private vvEntities = new Map<string, Entity>();
   private cpaEntities = new Map<string, Entity>();
+  private pzEntities = new Map<string, Entity>();
   private selectedAcid: string | null = null;
   private _altScale = 1.0;
   private _labelsVisible = true;
   private _leadersVisible = true;
+  private _pzVisible = false;
 
   // Previous CAS per aircraft for accel/decel detection.
   private _prevCas = new Map<string, number>();
@@ -265,6 +271,46 @@ export class AircraftManager {
           cpaEntity.show = false;
         }
       }
+
+      // ── Separation ring (protected zone) ──────────
+      const rpz = data.rpz?.[i] ?? 0;
+      if (this._pzVisible && rpz > 0) {
+        const pzColor = inconf
+          ? COLOR_PZ_CONFLICT : COLOR_PZ;
+        let pzEntity = this.pzEntities.get(acid);
+        if (pzEntity) {
+          pzEntity.show = true;
+          pzEntity.position =
+            new ConstantPositionProperty(position);
+          pzEntity.ellipse!.semiMajorAxis =
+            new ConstantProperty(rpz);
+          pzEntity.ellipse!.semiMinorAxis =
+            new ConstantProperty(rpz);
+          (pzEntity.ellipse!.material as any) = pzColor;
+          (pzEntity.ellipse!.outlineColor as any) =
+            pzColor.withAlpha(0.6);
+        } else {
+          pzEntity = this.viewer.entities.add({
+            id: `pz-${acid}`,
+            position,
+            ellipse: {
+              semiMajorAxis: rpz,
+              semiMinorAxis: rpz,
+              material: pzColor,
+              outline: true,
+              outlineColor: pzColor.withAlpha(0.6),
+              outlineWidth: 1,
+              height: alt * this._altScale,
+            },
+          });
+          this.pzEntities.set(acid, pzEntity);
+        }
+      } else {
+        const pzEntity = this.pzEntities.get(acid);
+        if (pzEntity) {
+          pzEntity.show = false;
+        }
+      }
     }
   }
 
@@ -283,6 +329,16 @@ export class AircraftManager {
     this._leadersVisible = visible;
     for (const vv of this.vvEntities.values()) {
       vv.show = visible;
+    }
+  }
+
+  /** Toggle separation ring visibility. */
+  setPzVisible(visible: boolean): void {
+    this._pzVisible = visible;
+    if (!visible) {
+      for (const pz of this.pzEntities.values()) {
+        pz.show = false;
+      }
     }
   }
 
@@ -317,6 +373,11 @@ export class AircraftManager {
     if (cpa) {
       this.viewer.entities.remove(cpa);
       this.cpaEntities.delete(acid);
+    }
+    const pz = this.pzEntities.get(acid);
+    if (pz) {
+      this.viewer.entities.remove(pz);
+      this.pzEntities.delete(acid);
     }
     this._prevCas.delete(acid);
   }
