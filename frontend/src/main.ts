@@ -17,6 +17,7 @@ import { AircraftManager } from './cesium/entities/aircraft';
 import { TrailManager } from './cesium/entities/trails';
 import { RouteManager } from './cesium/entities/routes';
 import { NavdataManager } from './cesium/entities/navdata';
+import { AreaManager } from './cesium/entities/areas';
 import { SimWebSocket } from './services/websocket';
 import type { AcData, SimInfo, TrailData } from './types';
 
@@ -45,6 +46,8 @@ const aircraftMgr = new AircraftManager(viewer);
 const trailMgr = new TrailManager(viewer);
 const routeMgr = new RouteManager(viewer);
 const navMgr = new NavdataManager(viewer);
+const areaMgr = new AreaManager(viewer);
+areaMgr.startPolling(2000);
 
 // ── Connect WebSocket ───────────────────────────────
 const wsUrl = `ws://${window.location.host}/ws/sim`;

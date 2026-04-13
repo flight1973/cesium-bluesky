@@ -1,15 +1,12 @@
 /**
  * Area drawing tool for defining BlueSky deletion areas.
  *
- * Modes:
- *   BOX  — click two corners to define a rectangle
- *   POLY — click multiple points, double-click to finish
- *
- * Shows a live preview polygon on the globe while drawing.
- * After drawing, sends the shape command (BOX/POLY) and
- * then AREA <name> to activate it as the deletion area.
+ * Handles draw interaction (BOX/POLY) and sends commands.
+ * The AreaManager in cesium/entities/areas.ts handles the
+ * persistent display by polling the backend — so all
+ * clients see all areas regardless of who created them.
  */
-import { LitElement, html, css, nothing } from 'lit';
+import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import {
   Viewer,
@@ -41,9 +38,6 @@ export class AreaTool extends LitElement {
   private onStopDraw: (() => void) | null = null;
   private viewer: Viewer | null = null;
   private previewEntity: Entity | null = null;
-  private activeEntity: Entity | null = null;
-  private lastDrawnPoints: LatLon[] = [];
-  private lastDrawnMode: DrawMode = 'off';
 
   static styles = css`
     :host {
@@ -119,7 +113,7 @@ export class AreaTool extends LitElement {
           : 'Click opposite corner';
       } else {
         hint = n < 3
-          ? `Click points (${n} placed, need 3+)`
+          ? `Click points (${n}, need 3+)`
           : `${n} points \u2014 dbl-click to finish`;
       }
       return html`
@@ -178,7 +172,7 @@ export class AreaTool extends LitElement {
     this.onStopDraw = stopDraw;
   }
 
-  // ── Drawing modes ─────────────────────────────────
+  // ── Drawing ───────────────────────────────────────
 
   private _startBox(): void {
     this.mode = 'box';
@@ -208,7 +202,6 @@ export class AreaTool extends LitElement {
   private _addPoint(lat: number, lon: number): void {
     this.points = [...this.points, { lat, lon }];
     this._updatePreview();
-
     if (this.mode === 'box' && this.points.length >= 2) {
       this._finishDraw();
     }
@@ -219,13 +212,13 @@ export class AreaTool extends LitElement {
 
     if (this.mode === 'box' && this.points.length >= 2) {
       const p = this.points;
-      const cmd =
+      this.onCommand?.(
         `BOX ${name},` +
         `${p[0].lat.toFixed(6)},` +
         `${p[0].lon.toFixed(6)},` +
         `${p[1].lat.toFixed(6)},` +
-        `${p[1].lon.toFixed(6)}`;
-      this.onCommand?.(cmd);
+        `${p[1].lon.toFixed(6)}`,
+      );
     } else if (
       this.mode === 'poly' && this.points.length >= 3
     ) {
@@ -238,15 +231,11 @@ export class AreaTool extends LitElement {
       this.onCommand?.(`POLY ${name},${coords}`);
     }
 
-    // Save the drawn shape for persistent display.
-    this.lastDrawnPoints = [...this.points];
-    this.lastDrawnMode = this.mode;
-
-    // Activate and verify the area was created.
-    setTimeout(async () => {
+    // Activate as deletion area.
+    setTimeout(() => {
       this.onCommand?.(`AREA ${name}`);
-      // Poll backend to confirm.
-      await this._verifyArea(name);
+      // AreaManager poll will update the display.
+      setTimeout(() => this._syncState(), 1000);
     }, 300);
 
     this.mode = 'off';
@@ -255,87 +244,59 @@ export class AreaTool extends LitElement {
     this.onStopDraw?.();
   }
 
+  // ── Area state ────────────────────────────────────
+
+  private _toggleArea(): void {
+    if (this.areaActive) {
+      this.onCommand?.('AREA OFF');
+      this.areaActive = false;
+    } else {
+      const name = this.areaName || 'SIMAREA';
+      this.onCommand?.(`AREA ${name}`);
+      // Let the poll sync the display.
+      setTimeout(() => this._syncState(), 1000);
+    }
+  }
+
   private async _checkArea(): Promise<void> {
+    await this._syncState(true);
+  }
+
+  private async _syncState(
+    echo = false,
+  ): Promise<void> {
     try {
       const res = await fetch('/api/areas');
       if (!res.ok) return;
       const data = await res.json();
       const names = Object.keys(data.shapes || {});
       const active = data.active_area;
-      let msg = `Shapes: ${names.length > 0
-          ? names.join(', ') : 'none'}`;
-      msg += ` | Active: ${active || 'none'}`;
-      this.dispatchEvent(
-        new CustomEvent('echo', {
-          detail: { text: msg },
-          bubbles: true,
-          composed: true,
-        }),
-      );
-      // Sync button and display with backend.
       this.areaActive = !!active;
-      this._clearActiveArea();
-      if (this.areaActive && active) {
-        const shape = data.shapes[active];
-        if (shape) {
-          this._showAreaFromCoords(
-            shape.type, shape.coordinates,
-          );
-        }
+
+      if (echo) {
+        let msg = `Shapes: ${names.length > 0
+            ? names.join(', ') : 'none'}`;
+        msg += ` | Active: ${active || 'none'}`;
+        this.dispatchEvent(
+          new CustomEvent('echo', {
+            detail: { text: msg },
+            bubbles: true,
+            composed: true,
+          }),
+        );
       }
     } catch {
       // Non-fatal.
     }
   }
 
-  private _toggleArea(): void {
-    if (this.areaActive) {
-      this.onCommand?.('AREA OFF');
-      this.areaActive = false;
-      this._clearActiveArea();
-    } else {
-      const name = this.areaName || 'SIMAREA';
-      this.onCommand?.(`AREA ${name}`);
-      this.areaActive = true;
-      // Fetch coords from backend to display.
-      setTimeout(() => this._checkArea(), 500);
-    }
-  }
-
-  // ── Backend verification ───────────────────────────
-
-  private async _verifyArea(name: string): Promise<void> {
-    await new Promise((r) => setTimeout(r, 500));
-    try {
-      const res = await fetch('/api/areas');
-      if (!res.ok) return;
-      const data = await res.json();
-      const shape = data.shapes?.[name];
-      if (!shape) return;
-      if (data.active_area !== name) {
-        this.onCommand?.(`AREA ${name}`);
-        await new Promise((r) => setTimeout(r, 500));
-      }
-      this.areaActive = true;
-      this._clearActiveArea();
-      this._showAreaFromCoords(
-        shape.type, shape.coordinates,
-      );
-    } catch {
-      // Non-fatal — fall back to local preview.
-      this.areaActive = true;
-      this._showActiveArea();
-    }
-  }
-
-  // ── Live preview on the globe ─────────────────────
+  // ── Draw preview (yellow, temporary) ──────────────
 
   private _updatePreview(): void {
     if (!this.viewer) return;
     this._clearPreview();
 
     if (this.points.length === 1) {
-      // Single point — yellow dot.
       this.previewEntity = this.viewer.entities.add({
         position: Cartesian3.fromDegrees(
           this.points[0].lon, this.points[0].lat,
@@ -348,7 +309,6 @@ export class AreaTool extends LitElement {
       return;
     }
 
-    // Build polygon positions.
     let coords: number[];
     if (this.mode === 'box' && this.points.length >= 2) {
       const a = this.points[0];
@@ -386,106 +346,6 @@ export class AreaTool extends LitElement {
     if (this.previewEntity && this.viewer) {
       this.viewer.entities.remove(this.previewEntity);
       this.previewEntity = null;
-    }
-  }
-
-  // ── Persistent active area display ────────────────
-
-  private _showActiveArea(): void {
-    if (!this.viewer || this.lastDrawnPoints.length < 2) {
-      return;
-    }
-    this._clearActiveArea();
-
-    let coords: number[];
-    if (
-      this.lastDrawnMode === 'box'
-      && this.lastDrawnPoints.length >= 2
-    ) {
-      const a = this.lastDrawnPoints[0];
-      const b = this.lastDrawnPoints[1];
-      coords = [
-        a.lon, a.lat,
-        b.lon, a.lat,
-        b.lon, b.lat,
-        a.lon, b.lat,
-      ];
-    } else {
-      coords = [];
-      for (const p of this.lastDrawnPoints) {
-        coords.push(p.lon, p.lat);
-      }
-    }
-
-    const positions =
-      Cartesian3.fromDegreesArray(coords);
-
-    this.activeEntity = this.viewer.entities.add({
-      polygon: {
-        hierarchy: new PolygonHierarchy(positions),
-        material: new Color(0, 1, 0, 0.08),
-        outline: true,
-        outlineColor: new Color(0, 1, 0, 0.6),
-        outlineWidth: 2,
-      },
-    });
-  }
-
-  /**
-   * Draw area boundary from backend coordinates.
-   *
-   * Coordinates from BlueSky are [lat,lon,lat,lon,...].
-   * For Box: [lat1,lon1,lat2,lon2] (two corners).
-   * For Poly: [lat1,lon1,lat2,lon2,...] (vertices).
-   */
-  private _showAreaFromCoords(
-    shapeType: string,
-    coordinates: number[],
-  ): void {
-    if (!this.viewer || coordinates.length < 4) return;
-    this._clearActiveArea();
-
-    // Build [lon,lat,...] array for Cesium.
-    let cesiumCoords: number[];
-    if (shapeType === 'Box') {
-      const lat1 = coordinates[0];
-      const lon1 = coordinates[1];
-      const lat2 = coordinates[2];
-      const lon2 = coordinates[3];
-      cesiumCoords = [
-        lon1, lat1,
-        lon2, lat1,
-        lon2, lat2,
-        lon1, lat2,
-      ];
-    } else {
-      // Poly — coords are [lat,lon,lat,lon,...]
-      cesiumCoords = [];
-      for (let i = 0; i < coordinates.length - 1; i += 2) {
-        cesiumCoords.push(
-          coordinates[i + 1], coordinates[i],
-        );
-      }
-    }
-
-    const positions =
-      Cartesian3.fromDegreesArray(cesiumCoords);
-
-    this.activeEntity = this.viewer.entities.add({
-      polygon: {
-        hierarchy: new PolygonHierarchy(positions),
-        material: new Color(0, 1, 0, 0.08),
-        outline: true,
-        outlineColor: new Color(0, 1, 0, 0.6),
-        outlineWidth: 2,
-      },
-    });
-  }
-
-  private _clearActiveArea(): void {
-    if (this.activeEntity && this.viewer) {
-      this.viewer.entities.remove(this.activeEntity);
-      this.activeEntity = null;
     }
   }
 }
