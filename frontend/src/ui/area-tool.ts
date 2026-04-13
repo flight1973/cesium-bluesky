@@ -265,7 +265,6 @@ export class AreaTool extends LitElement {
       let msg = `Shapes: ${names.length > 0
           ? names.join(', ') : 'none'}`;
       msg += ` | Active: ${active || 'none'}`;
-      // Echo to console without sending a sim command.
       this.dispatchEvent(
         new CustomEvent('echo', {
           detail: { text: msg },
@@ -273,12 +272,16 @@ export class AreaTool extends LitElement {
           composed: true,
         }),
       );
-      // Sync button state with backend.
+      // Sync button and display with backend.
       this.areaActive = !!active;
-      if (this.areaActive) {
-        this._showActiveArea();
-      } else {
-        this._clearActiveArea();
+      this._clearActiveArea();
+      if (this.areaActive && active) {
+        const shape = data.shapes[active];
+        if (shape) {
+          this._showAreaFromCoords(
+            shape.type, shape.coordinates,
+          );
+        }
       }
     } catch {
       // Non-fatal.
@@ -294,34 +297,34 @@ export class AreaTool extends LitElement {
       const name = this.areaName || 'SIMAREA';
       this.onCommand?.(`AREA ${name}`);
       this.areaActive = true;
-      this._showActiveArea();
+      // Fetch coords from backend to display.
+      setTimeout(() => this._checkArea(), 500);
     }
   }
 
   // ── Backend verification ───────────────────────────
 
   private async _verifyArea(name: string): Promise<void> {
-    // Wait a moment for the sim to process.
     await new Promise((r) => setTimeout(r, 500));
     try {
       const res = await fetch('/api/areas');
       if (!res.ok) return;
       const data = await res.json();
-      if (
-        data.shapes?.[name]
-        && data.active_area === name
-      ) {
-        this.areaActive = true;
-        this._showActiveArea();
-      } else if (data.shapes?.[name]) {
-        // Shape exists but not active yet — retry.
+      const shape = data.shapes?.[name];
+      if (!shape) return;
+      if (data.active_area !== name) {
         this.onCommand?.(`AREA ${name}`);
         await new Promise((r) => setTimeout(r, 500));
-        this.areaActive = true;
-        this._showActiveArea();
       }
+      this.areaActive = true;
+      this._clearActiveArea();
+      this._showAreaFromCoords(
+        shape.type, shape.coordinates,
+      );
     } catch {
-      // Non-fatal.
+      // Non-fatal — fall back to local preview.
+      this.areaActive = true;
+      this._showActiveArea();
     }
   }
 
@@ -416,6 +419,57 @@ export class AreaTool extends LitElement {
 
     const positions =
       Cartesian3.fromDegreesArray(coords);
+
+    this.activeEntity = this.viewer.entities.add({
+      polygon: {
+        hierarchy: new PolygonHierarchy(positions),
+        material: new Color(0, 1, 0, 0.08),
+        outline: true,
+        outlineColor: new Color(0, 1, 0, 0.6),
+        outlineWidth: 2,
+      },
+    });
+  }
+
+  /**
+   * Draw area boundary from backend coordinates.
+   *
+   * Coordinates from BlueSky are [lat,lon,lat,lon,...].
+   * For Box: [lat1,lon1,lat2,lon2] (two corners).
+   * For Poly: [lat1,lon1,lat2,lon2,...] (vertices).
+   */
+  private _showAreaFromCoords(
+    shapeType: string,
+    coordinates: number[],
+  ): void {
+    if (!this.viewer || coordinates.length < 4) return;
+    this._clearActiveArea();
+
+    // Build [lon,lat,...] array for Cesium.
+    let cesiumCoords: number[];
+    if (shapeType === 'Box') {
+      const lat1 = coordinates[0];
+      const lon1 = coordinates[1];
+      const lat2 = coordinates[2];
+      const lon2 = coordinates[3];
+      cesiumCoords = [
+        lon1, lat1,
+        lon2, lat1,
+        lon2, lat2,
+        lon1, lat2,
+      ];
+    } else {
+      // Poly — coords are [lat,lon,lat,lon,...]
+      cesiumCoords = [];
+      for (let i = 0; i < coordinates.length - 1; i += 2) {
+        cesiumCoords.push(
+          coordinates[i + 1], coordinates[i],
+        );
+      }
+    }
+
+    const positions =
+      Cartesian3.fromDegreesArray(cesiumCoords);
 
     this.activeEntity = this.viewer.entities.add({
       polygon: {
