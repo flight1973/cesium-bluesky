@@ -1,0 +1,298 @@
+"""SimBridge: Wraps BlueSky simulation in a background thread.
+
+The bridge initializes BlueSky in detached mode (no ZMQ networking),
+runs the simulation loop in a daemon thread, and exposes methods for
+queuing commands and reading state that are safe to call from
+FastAPI's async handlers.
+"""
+import logging
+from pathlib import Path
+import threading
+
+import bluesky as bs
+from bluesky.core.walltime import Timer
+
+from cesium_app.sim.state_collector import StateCollector
+
+logger = logging.getLogger(__name__)
+
+# Map numeric sim state to human-readable name.
+_STATE_NAMES: dict[int, str] = {
+    bs.INIT: "INIT",
+    bs.HOLD: "HOLD",
+    bs.OP: "OP",
+    bs.END: "END",
+}
+
+
+def _state_name(state: int) -> str:
+    """Convert a numeric simulation state to its name."""
+    return _STATE_NAMES.get(state, f"UNKNOWN({state})")
+
+
+class SimBridge:
+    """Manages the BlueSky simulation lifecycle.
+
+    Runs the simulation in a background thread and provides a
+    thread-safe API for commands and state reads.
+
+    Usage::
+
+        bridge = SimBridge()
+        bridge.start()
+        bridge.stack_command("CRE KL204 B738 52 4 180 FL350 280")
+        info = bridge.get_sim_info()
+        bridge.stop()
+    """
+
+    def __init__(
+        self,
+        scenario_file: str | None = None,
+        workdir: str | None = None,
+    ) -> None:
+        self._thread: threading.Thread | None = None
+        self._scenario_file = scenario_file
+        self._workdir = workdir
+        self._started = threading.Event()
+        self._initialized = False
+        self.collector = StateCollector()
+
+    def start(self) -> None:
+        """Initialize BlueSky and start the sim loop thread."""
+        if self._thread is not None and self._thread.is_alive():
+            logger.warning("SimBridge already running")
+            return
+
+        # Initialize BlueSky in the main thread so singletons
+        # are set up before any API calls can arrive.
+        workdir = Path(self._workdir) if self._workdir else None
+        logger.info(
+            "Initializing BlueSky in detached mode "
+            "(workdir=%s)",
+            workdir,
+        )
+        bs.init(
+            mode='sim',
+            detached=True,
+            scenfile=self._scenario_file,
+            workdir=workdir,
+        )
+        self._initialized = True
+        self.collector.install()
+
+        self._thread = threading.Thread(
+            target=self._run_loop,
+            name="bluesky-sim",
+            daemon=True,
+        )
+        self._thread.start()
+        self._started.wait(timeout=5.0)
+        logger.info("SimBridge started")
+
+    def stop(self) -> None:
+        """Signal the sim to quit and wait for the thread."""
+        if not self._initialized:
+            return
+        logger.info("Stopping SimBridge")
+        bs.sim.quit()
+        if self._thread is not None:
+            self._thread.join(timeout=10.0)
+            if self._thread.is_alive():
+                logger.warning("Sim thread did not exit cleanly")
+        self._thread = None
+        logger.info("SimBridge stopped")
+
+    def stack_command(self, cmdline: str) -> None:
+        """Queue a command for the next simulation cycle.
+
+        Safe to call from any thread. CPython's GIL makes
+        list.append atomic, and bluesky.stack.stack() only
+        appends to Stack.cmdstack.
+        """
+        from bluesky import stack
+        stack.stack(cmdline)
+
+    def get_sim_info(self) -> dict:
+        """Read current simulation state.
+
+        Returns:
+            Dict with simt, simdt, utc, dtmult, ntraf, state,
+            state_name, and scenname keys.
+        """
+        if not self._initialized:
+            return {"state": "not_initialized"}
+
+        from bluesky.stack import stackbase
+        return {
+            "simt": bs.sim.simt,
+            "simdt": bs.sim.simdt,
+            "utc": str(bs.sim.utc.replace(microsecond=0)),
+            "dtmult": bs.sim.dtmult,
+            "ntraf": bs.traf.ntraf,
+            "state": bs.sim.state,
+            "state_name": _state_name(bs.sim.state),
+            "scenname": stackbase.get_scenname(),
+        }
+
+    def get_aircraft_data(self) -> dict:
+        """Read all aircraft state arrays as Python lists.
+
+        Returns:
+            Dict with id, lat, lon, alt, tas, cas, gs, trk,
+            and vs arrays.
+        """
+        if not self._initialized or bs.traf.ntraf == 0:
+            return {
+                "id": [], "lat": [], "lon": [], "alt": [],
+                "tas": [], "cas": [], "gs": [],
+                "trk": [], "vs": [],
+            }
+
+        return {
+            "id": list(bs.traf.id),
+            "lat": bs.traf.lat.tolist(),
+            "lon": bs.traf.lon.tolist(),
+            "alt": bs.traf.alt.tolist(),
+            "tas": bs.traf.tas.tolist(),
+            "cas": bs.traf.cas.tolist(),
+            "gs": bs.traf.gs.tolist(),
+            "trk": bs.traf.trk.tolist(),
+            "vs": bs.traf.vs.tolist(),
+        }
+
+    def get_aircraft_by_id(self, acid: str) -> dict | None:
+        """Read state for a single aircraft by callsign.
+
+        Args:
+            acid: Aircraft callsign (case-insensitive).
+
+        Returns:
+            Dict with aircraft state, or None if not found.
+        """
+        if not self._initialized:
+            return None
+        idx = bs.traf.id2idx(acid.upper())
+        if idx < 0:
+            return None
+        return {
+            "acid": bs.traf.id[idx],
+            "lat": float(bs.traf.lat[idx]),
+            "lon": float(bs.traf.lon[idx]),
+            "alt": float(bs.traf.alt[idx]),
+            "tas": float(bs.traf.tas[idx]),
+            "cas": float(bs.traf.cas[idx]),
+            "gs": float(bs.traf.gs[idx]),
+            "trk": float(bs.traf.trk[idx]),
+            "vs": float(bs.traf.vs[idx]),
+        }
+
+    def get_aircraft_detail(self, acid: str) -> dict | None:
+        """Read full detail for one aircraft.
+
+        Includes current state, autopilot targets, origin,
+        destination, and route waypoints.
+
+        Args:
+            acid: Aircraft callsign (case-insensitive).
+
+        Returns:
+            Dict with full aircraft detail, or None.
+        """
+        if not self._initialized:
+            return None
+        idx = bs.traf.id2idx(acid.upper())
+        if idx < 0:
+            return None
+        ap = bs.traf.ap
+        route = ap.route[idx]
+        # Find orig/dest from route wptype list.
+        orig = next(
+            (n for n, t in zip(route.wpname, route.wptype)
+             if t == 2), ap.orig[idx] if ap.orig else "",
+        )
+        dest = next(
+            (n for n, t in zip(route.wpname, route.wptype)
+             if t == 3), ap.dest[idx] if ap.dest else "",
+        )
+        return {
+            "acid": bs.traf.id[idx],
+            "actype": bs.traf.type[idx],
+            "lat": float(bs.traf.lat[idx]),
+            "lon": float(bs.traf.lon[idx]),
+            "alt": float(bs.traf.alt[idx]),
+            "tas": float(bs.traf.tas[idx]),
+            "cas": float(bs.traf.cas[idx]),
+            "gs": float(bs.traf.gs[idx]),
+            "trk": float(bs.traf.trk[idx]),
+            "vs": float(bs.traf.vs[idx]),
+            "orig": orig,
+            "dest": dest,
+            "sel_hdg": float(ap.trk[idx]),
+            "sel_alt": float(ap.alt[idx]),
+            "sel_spd": float(ap.spd[idx]),
+            "sel_vs": float(ap.vs[idx]),
+            "lnav": bool(bs.traf.swlnav[idx]),
+            "vnav": bool(bs.traf.swvnav[idx]),
+            "route": {
+                "iactwp": route.iactwp,
+                "wpname": list(route.wpname),
+                "wplat": list(route.wplat),
+                "wplon": list(route.wplon),
+                "wpalt": list(route.wpalt),
+                "wpspd": list(route.wpspd),
+            },
+        }
+
+    def get_route_data(self, acid: str) -> dict | None:
+        """Read route/FMS data for a single aircraft.
+
+        Args:
+            acid: Aircraft callsign (case-insensitive).
+
+        Returns:
+            Dict with route waypoints, or None if not found.
+        """
+        if not self._initialized:
+            return None
+        idx = bs.traf.id2idx(acid.upper())
+        if idx < 0:
+            return None
+        route = bs.traf.ap.route[idx]
+        return {
+            "acid": acid.upper(),
+            "iactwp": route.iactwp,
+            "aclat": float(bs.traf.lat[idx]),
+            "aclon": float(bs.traf.lon[idx]),
+            "wplat": list(route.wplat),
+            "wplon": list(route.wplon),
+            "wpalt": list(route.wpalt),
+            "wpspd": list(route.wpspd),
+            "wpname": list(route.wpname),
+        }
+
+    @property
+    def is_running(self) -> bool:
+        """Whether the simulation thread is alive."""
+        return (
+            self._thread is not None
+            and self._thread.is_alive()
+        )
+
+    # ── Private ──────────────────────────────────────────
+
+    def _run_loop(self) -> None:
+        """Simulation main loop (runs in background thread).
+
+        Mirrors Simulation.run() but without installing signal
+        handlers (those belong to the main thread).
+        """
+        logger.info("Sim loop starting")
+        self._started.set()
+
+        while bs.sim.state != bs.END:
+            Timer.update_timers()
+            bs.net.update()
+            bs.sim.update()
+            bs.scr.update()
+
+        logger.info("Sim loop exited")

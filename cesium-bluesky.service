@@ -1,0 +1,20 @@
+[Unit]
+Description=Cesium-BlueSky ATM Simulator Service
+After=network.target
+
+[Service]
+Type=simple
+User=cmartin
+WorkingDirectory=/Users/cmartin/git/cesium-bluesky
+ExecStart=/Users/cmartin/miniconda3/bin/python -m cesium_app
+Restart=on-failure
+RestartSec=5
+Environment=CESIUM_BLUESKY_HOST=0.0.0.0
+Environment=CESIUM_BLUESKY_PORT=8000
+
+# Clean shutdown — SIGTERM triggers FastAPI lifespan cleanup → SimBridge.stop()
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

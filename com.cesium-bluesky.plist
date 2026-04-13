@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.cesium-bluesky</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/cmartin/miniconda3/bin/python</string>
+        <string>-m</string>
+        <string>cesium_app</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/cmartin/git/cesium-bluesky</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>CESIUM_BLUESKY_HOST</key>
+        <string>0.0.0.0</string>
+        <key>CESIUM_BLUESKY_PORT</key>
+        <string>8000</string>
+    </dict>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/cesium-bluesky.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/cesium-bluesky.stderr.log</string>
+</dict>
+</plist>
