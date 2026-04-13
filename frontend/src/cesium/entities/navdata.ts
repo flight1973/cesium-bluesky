@@ -31,7 +31,7 @@ export class NavdataManager {
   private _debounceTimer: number | null = null;
   private _lastBounds = '';
   private _aptVisible = true;
-  private _wptVisible = true;
+  private _wptVisible = false;
 
   constructor(private viewer: Viewer) {
     this.aptSource = new CustomDataSource('airports');
@@ -96,8 +96,10 @@ export class NavdataManager {
     this._lastBounds = key;
 
     await Promise.all([
-      this._fetchAirports(lat1, lon1, lat2, lon2, zoom),
-      zoom >= 2
+      this._aptVisible
+        ? this._fetchAirports(lat1, lon1, lat2, lon2, zoom)
+        : Promise.resolve(),
+      this._wptVisible && zoom >= 2
         ? this._fetchWaypoints(lat1, lon1, lat2, lon2)
         : this._clearWaypoints(),
     ]);

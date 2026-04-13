@@ -17,7 +17,7 @@ export class BlueSkyToolbar extends LitElement {
   @state() showRoutes = true;
   @state() showLabels = true;
   @state() showAirports = true;
-  @state() showWaypoints = true;
+  @state() showWaypoints = false;
   @state() showLeaders = true;
   @state() is3D = true;
   @state() altScale = 10;
