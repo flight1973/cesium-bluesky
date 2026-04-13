@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from cesium_app.api import areas
 from cesium_app.api import commands
 from cesium_app.api import navdata
 from cesium_app.api import scenario
@@ -84,6 +85,7 @@ app.include_router(commands.router)
 app.include_router(traffic.router)
 app.include_router(scenario.router)
 app.include_router(navdata.router)
+app.include_router(areas.router)
 app.include_router(ws_streams.router)
 
 

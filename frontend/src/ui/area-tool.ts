@@ -151,6 +151,9 @@ export class AreaTool extends LitElement {
         @click=${this._toggleArea}
       >${this.areaActive
           ? 'AREA ON' : 'AREA OFF'}</button>
+      <button @click=${this._checkArea}>
+        CHECK
+      </button>
     `;
   }
 
@@ -239,16 +242,35 @@ export class AreaTool extends LitElement {
     this.lastDrawnPoints = [...this.points];
     this.lastDrawnMode = this.mode;
 
-    setTimeout(() => {
+    // Activate and verify the area was created.
+    setTimeout(async () => {
       this.onCommand?.(`AREA ${name}`);
-      this.areaActive = true;
-      this._showActiveArea();
+      // Poll backend to confirm.
+      await this._verifyArea(name);
     }, 300);
 
     this.mode = 'off';
     this.points = [];
     this._clearPreview();
     this.onStopDraw?.();
+  }
+
+  private async _checkArea(): Promise<void> {
+    try {
+      const res = await fetch('/api/areas');
+      if (!res.ok) return;
+      const data = await res.json();
+      const names = Object.keys(data.shapes || {});
+      const active = data.active_area;
+      let msg = `Shapes: ${names.length > 0
+          ? names.join(', ') : 'none'}`;
+      msg += ` | Active: ${active || 'none'}`;
+      this.onCommand?.(`ECHO ${msg}`);
+      // Sync our button state with backend.
+      this.areaActive = !!active;
+    } catch {
+      this.onCommand?.('ECHO Area check failed');
+    }
   }
 
   private _toggleArea(): void {
@@ -261,6 +283,33 @@ export class AreaTool extends LitElement {
       this.onCommand?.(`AREA ${name}`);
       this.areaActive = true;
       this._showActiveArea();
+    }
+  }
+
+  // ── Backend verification ───────────────────────────
+
+  private async _verifyArea(name: string): Promise<void> {
+    // Wait a moment for the sim to process.
+    await new Promise((r) => setTimeout(r, 500));
+    try {
+      const res = await fetch('/api/areas');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (
+        data.shapes?.[name]
+        && data.active_area === name
+      ) {
+        this.areaActive = true;
+        this._showActiveArea();
+      } else if (data.shapes?.[name]) {
+        // Shape exists but not active yet — retry.
+        this.onCommand?.(`AREA ${name}`);
+        await new Promise((r) => setTimeout(r, 500));
+        this.areaActive = true;
+        this._showActiveArea();
+      }
+    } catch {
+      // Non-fatal.
     }
   }
 
