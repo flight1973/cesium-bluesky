@@ -22,6 +22,7 @@ import { customElement, state, query } from 'lit/decorators.js';
 interface CmdInfo {
   name: string;
   brief: string;
+  aliases?: string[];
 }
 
 @customElement('bluesky-console')
@@ -128,13 +129,26 @@ export class BlueSkyConsole extends LitElement {
     `;
   }
 
-  /** Load command briefs from backend for hint display. */
+  /** Load command briefs from backend for hint display.
+   *
+   * Maps both primary names AND aliases to the same brief
+   * so hints work for command synonyms like Q/QUIT,
+   * COLOR/COLOUR, SCEN/SCENARIO, etc.
+   */
   async loadCommandBriefs(): Promise<void> {
     try {
       const res = await fetch('/api/commands/list');
       const cmds: CmdInfo[] = await res.json();
       for (const c of cmds) {
         this.cmdBriefs.set(c.name.toUpperCase(), c.brief);
+        // Map aliases to the same brief as the primary.
+        if (c.aliases) {
+          for (const alias of c.aliases) {
+            this.cmdBriefs.set(
+              alias.toUpperCase(), c.brief,
+            );
+          }
+        }
       }
     } catch {
       // Briefs are optional; console still works.
