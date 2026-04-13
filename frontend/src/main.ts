@@ -122,6 +122,7 @@ cmdConsole.setCommandHandler(sendCommand);
 acPanel.setCommandHandler(sendCommand);
 fmsPanel.setCommandHandler(sendCommand);
 areaTool.setCommandHandler(sendCommand);
+areaTool.setViewer(viewer);
 cmdConsole.loadCommandBriefs();
 
 // ── Aircraft selection logic ────────────────────────

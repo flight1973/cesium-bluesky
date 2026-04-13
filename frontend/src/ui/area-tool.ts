@@ -5,12 +5,19 @@
  *   BOX  — click two corners to define a rectangle
  *   POLY — click multiple points, double-click to finish
  *
+ * Shows a live preview polygon on the globe while drawing.
  * After drawing, sends the shape command (BOX/POLY) and
  * then AREA <name> to activate it as the deletion area.
- * Aircraft leaving the area are removed from the sim.
  */
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
+import {
+  Viewer,
+  Entity,
+  Cartesian3,
+  Color,
+  PolygonHierarchy,
+} from 'cesium';
 
 type DrawMode = 'off' | 'box' | 'poly';
 
@@ -26,11 +33,14 @@ export class AreaTool extends LitElement {
   @state() private areaName = 'SIMAREA';
   @state() private areaActive = false;
 
-  private onCommand: ((cmd: string) => void) | null = null;
+  private onCommand:
+    ((cmd: string) => void) | null = null;
   private onStartDraw:
     ((cb: (lat: number, lon: number) => void,
       doneCb: () => void) => void) | null = null;
   private onStopDraw: (() => void) | null = null;
+  private viewer: Viewer | null = null;
+  private previewEntity: Entity | null = null;
 
   static styles = css`
     :host {
@@ -70,10 +80,6 @@ export class AreaTool extends LitElement {
       background: #ff4444;
       color: #000;
     }
-    button.drawing {
-      color: #ffff00;
-      border-color: #ffff00;
-    }
     input {
       background: #222;
       border: 1px solid #444;
@@ -102,12 +108,19 @@ export class AreaTool extends LitElement {
 
   render() {
     if (this.mode !== 'off') {
+      const n = this.points.length;
+      let hint: string;
+      if (this.mode === 'box') {
+        hint = n === 0
+          ? 'Click first corner'
+          : 'Click opposite corner';
+      } else {
+        hint = n < 3
+          ? `Click points (${n} placed, need 3+)`
+          : `${n} points \u2014 dbl-click to finish`;
+      }
       return html`
-        <span class="status">
-          ${this.mode === 'box'
-            ? `Click ${2 - this.points.length} corner${this.points.length === 1 ? '' : 's'}`
-            : `Click points (dbl-click to finish) [${this.points.length}]`}
-        </span>
+        <span class="status">${hint}</span>
         <button class="danger"
           @click=${this._cancel}
         >CANCEL</button>
@@ -123,32 +136,31 @@ export class AreaTool extends LitElement {
             (e.target as HTMLInputElement).value;
         }}
       />
-      <button @click=${this._startBox}>DRAW BOX</button>
-      <button @click=${this._startPoly}>DRAW POLY</button>
+      <button @click=${this._startBox}>
+        DRAW BOX
+      </button>
+      <button @click=${this._startPoly}>
+        DRAW POLY
+      </button>
       <div class="sep"></div>
       <button
         class=${this.areaActive ? 'active' : ''}
         @click=${this._toggleArea}
-      >${this.areaActive ? 'AREA ON' : 'AREA OFF'}</button>
+      >${this.areaActive
+          ? 'AREA ON' : 'AREA OFF'}</button>
     `;
   }
 
-  /** Set command handler. */
   setCommandHandler(
     handler: (cmd: string) => void,
   ): void {
     this.onCommand = handler;
   }
 
-  /**
-   * Set callbacks for managing the globe click mode.
-   *
-   * startDraw: called with a point callback and a done
-   *   callback when drawing begins. The host should
-   *   install a click handler that calls pointCb(lat,lon)
-   *   on each click, and doneCb() on double-click.
-   * stopDraw: called when drawing ends or is cancelled.
-   */
+  setViewer(v: Viewer): void {
+    this.viewer = v;
+  }
+
   setDrawCallbacks(
     startDraw: (
       pointCb: (lat: number, lon: number) => void,
@@ -183,11 +195,13 @@ export class AreaTool extends LitElement {
   private _cancel(): void {
     this.mode = 'off';
     this.points = [];
+    this._clearPreview();
     this.onStopDraw?.();
   }
 
   private _addPoint(lat: number, lon: number): void {
     this.points = [...this.points, { lat, lon }];
+    this._updatePreview();
 
     if (this.mode === 'box' && this.points.length >= 2) {
       this._finishDraw();
@@ -215,11 +229,9 @@ export class AreaTool extends LitElement {
             `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`,
         )
         .join(',');
-      const cmd = `POLY ${name},${coords}`;
-      this.onCommand?.(cmd);
+      this.onCommand?.(`POLY ${name},${coords}`);
     }
 
-    // Activate as deletion area.
     setTimeout(() => {
       this.onCommand?.(`AREA ${name}`);
       this.areaActive = true;
@@ -227,6 +239,7 @@ export class AreaTool extends LitElement {
 
     this.mode = 'off';
     this.points = [];
+    this._clearPreview();
     this.onStopDraw?.();
   }
 
@@ -238,6 +251,67 @@ export class AreaTool extends LitElement {
       const name = this.areaName || 'SIMAREA';
       this.onCommand?.(`AREA ${name}`);
       this.areaActive = true;
+    }
+  }
+
+  // ── Live preview on the globe ─────────────────────
+
+  private _updatePreview(): void {
+    if (!this.viewer) return;
+    this._clearPreview();
+
+    if (this.points.length === 1) {
+      // Single point — yellow dot.
+      this.previewEntity = this.viewer.entities.add({
+        position: Cartesian3.fromDegrees(
+          this.points[0].lon, this.points[0].lat,
+        ),
+        point: {
+          pixelSize: 8,
+          color: Color.YELLOW,
+        },
+      });
+      return;
+    }
+
+    // Build polygon positions.
+    let coords: number[];
+    if (this.mode === 'box' && this.points.length >= 2) {
+      const a = this.points[0];
+      const b = this.points[1];
+      coords = [
+        a.lon, a.lat,
+        b.lon, a.lat,
+        b.lon, b.lat,
+        a.lon, b.lat,
+      ];
+    } else if (this.points.length >= 2) {
+      coords = [];
+      for (const p of this.points) {
+        coords.push(p.lon, p.lat);
+      }
+    } else {
+      return;
+    }
+
+    const positions =
+      Cartesian3.fromDegreesArray(coords);
+
+    this.previewEntity = this.viewer.entities.add({
+      polygon: {
+        hierarchy: new PolygonHierarchy(positions),
+        material: new Color(1, 1, 0, 0.15),
+        outline: true,
+        outlineColor: Color.YELLOW,
+        outlineWidth: 2,
+      },
+    });
+  }
+
+  private _clearPreview(): void {
+    if (this.previewEntity && this.viewer) {
+      this.viewer.entities.remove(this.previewEntity);
+      this.previewEntity = null;
     }
   }
 }
