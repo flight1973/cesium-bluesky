@@ -250,6 +250,13 @@ export class AreaTool extends LitElement {
     if (this.areaActive) {
       this.onCommand?.('AREA OFF');
       this.areaActive = false;
+      // Trigger an immediate area display refresh.
+      this.dispatchEvent(
+        new CustomEvent('area-changed', {
+          bubbles: true,
+          composed: true,
+        }),
+      );
     } else {
       const name = this.areaName || 'SIMAREA';
       this.onCommand?.(`AREA ${name}`);

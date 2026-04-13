@@ -18,10 +18,6 @@ import {
 
 const COLOR_ACTIVE_FILL = new Color(0, 1, 0, 0.08);
 const COLOR_ACTIVE_OUTLINE = new Color(0, 1, 0, 0.6);
-const COLOR_INACTIVE_FILL = new Color(0.5, 0.5, 0.5, 0.05);
-const COLOR_INACTIVE_OUTLINE = new Color(
-  0.5, 0.5, 0.5, 0.4,
-);
 
 interface ShapeInfo {
   name: string;
@@ -92,30 +88,28 @@ export class AreaManager {
   private _render(data: AreasResponse): void {
     this.source.entities.removeAll();
 
-    for (const shape of Object.values(data.shapes)) {
-      const isActive = shape.name === data.active_area;
-      const coords = this._toDegreesArray(
-        shape.type, shape.coordinates,
-      );
-      if (!coords || coords.length < 6) continue;
+    // Only render the currently active deletion area.
+    if (!data.active_area) return;
+    const shape = data.shapes?.[data.active_area];
+    if (!shape) return;
 
-      const positions =
-        Cartesian3.fromDegreesArray(coords);
+    const coords = this._toDegreesArray(
+      shape.type, shape.coordinates,
+    );
+    if (!coords || coords.length < 6) return;
 
-      this.source.entities.add({
-        polygon: {
-          hierarchy: new PolygonHierarchy(positions),
-          material: isActive
-            ? COLOR_ACTIVE_FILL
-            : COLOR_INACTIVE_FILL,
-          outline: true,
-          outlineColor: isActive
-            ? COLOR_ACTIVE_OUTLINE
-            : COLOR_INACTIVE_OUTLINE,
-          outlineWidth: 2,
-        },
-      });
-    }
+    const positions =
+      Cartesian3.fromDegreesArray(coords);
+
+    this.source.entities.add({
+      polygon: {
+        hierarchy: new PolygonHierarchy(positions),
+        material: COLOR_ACTIVE_FILL,
+        outline: true,
+        outlineColor: COLOR_ACTIVE_OUTLINE,
+        outlineWidth: 2,
+      },
+    });
   }
 
   /**

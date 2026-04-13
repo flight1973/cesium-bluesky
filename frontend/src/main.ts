@@ -167,6 +167,17 @@ document.addEventListener(
   }) as EventListener,
 );
 
+// ── Area state changes → refresh display ───────────
+document.addEventListener(
+  'area-changed',
+  (() => {
+    // Poll a couple times to catch backend state.
+    for (const d of [200, 800]) {
+      setTimeout(() => areaMgr.refresh(), d);
+    }
+  }) as EventListener,
+);
+
 // ── RESET button → clear all client state ───────────
 document.addEventListener(
   'sim-reset',
