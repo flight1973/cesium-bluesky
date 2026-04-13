@@ -247,6 +247,10 @@ export class AircraftPanel extends LitElement {
               `VNAV ${d.acid} ${d.vnav ? 'OFF' : 'ON'}`,
             )}
           >VNAV ${d.vnav ? 'ON' : 'OFF'}</button>
+          <button
+            class="toggle-btn on"
+            @click=${() => this._openFms()}
+          >FMS</button>
         </div>
       </div>
 
@@ -302,6 +306,17 @@ export class AircraftPanel extends LitElement {
     this._stopRefresh();
     this.refreshTimer = window.setInterval(
       () => this._refresh(), 2000,
+    );
+  }
+
+  private _openFms(): void {
+    if (!this.detail) return;
+    this.dispatchEvent(
+      new CustomEvent('open-fms', {
+        detail: { acid: this.detail.acid },
+        bubbles: true,
+        composed: true,
+      }),
     );
   }
 

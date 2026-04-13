@@ -45,6 +45,13 @@
       z-index: 20;
     }
     aircraft-panel[hidden] { display: none; }
+    fms-panel {
+      position: absolute;
+      top: 0; right: 0;
+      height: 100%;
+      z-index: 25;
+    }
+    fms-panel[hidden] { display: none; }
 
     /* Cesium viewer fills the main area */
     #cesium-container {
@@ -99,6 +106,7 @@
     </div>
     <bluesky-traffic-list></bluesky-traffic-list>
     <aircraft-panel hidden></aircraft-panel>
+    <fms-panel hidden></fms-panel>
     <bluesky-statusbar></bluesky-statusbar>
     <bluesky-console></bluesky-console>
   </div>

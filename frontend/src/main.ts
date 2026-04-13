@@ -24,6 +24,7 @@ import './ui/status-bar';
 import './ui/traffic-list';
 import './ui/console';
 import './ui/aircraft-panel';
+import './ui/fms-panel';
 import './ui/camera-controls';
 
 import type { BlueSkyToolbar } from './ui/toolbar';
@@ -31,6 +32,7 @@ import type { BlueSkyStatusBar } from './ui/status-bar';
 import type { BlueSkyTrafficList } from './ui/traffic-list';
 import type { BlueSkyConsole } from './ui/console';
 import type { AircraftPanel } from './ui/aircraft-panel';
+import type { FmsPanel } from './ui/fms-panel';
 import type { CameraControls } from './ui/camera-controls';
 
 // ── Initialize Cesium viewer ────────────────────────
@@ -60,6 +62,9 @@ const cmdConsole = document.querySelector(
 const acPanel = document.querySelector(
   'aircraft-panel',
 ) as AircraftPanel;
+const fmsPanel = document.querySelector(
+  'fms-panel',
+) as FmsPanel;
 const camCtrl = document.querySelector(
   'camera-controls',
 ) as CameraControls;
@@ -108,6 +113,7 @@ function sendCommand(cmd: string): void {
 }
 cmdConsole.setCommandHandler(sendCommand);
 acPanel.setCommandHandler(sendCommand);
+fmsPanel.setCommandHandler(sendCommand);
 cmdConsole.loadCommandBriefs();
 
 // ── Aircraft selection logic ────────────────────────
@@ -154,6 +160,14 @@ document.addEventListener(
   (() => {
     aircraftMgr.select(null);
     routeMgr.clear();
+  }) as EventListener,
+);
+
+// ── FMS panel open event ────────────────────────────
+document.addEventListener(
+  'open-fms',
+  ((e: CustomEvent) => {
+    fmsPanel.open(e.detail.acid);
   }) as EventListener,
 );
 
