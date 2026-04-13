@@ -112,14 +112,15 @@ async function clearSimState(): Promise<void> {
   fmsPanel.close();
   aircraftMgr.select(null);
 
-  // Also clear all defined areas from the sim — RESET
-  // clears them in theory but can race with re-running
-  // scenario commands.  Explicitly delete each shape.
+  // Clear the rendered area boundaries immediately.
+  areaMgr.clear();
+
+  // Also explicitly delete shapes on the backend since
+  // bs.sim.reset() can race with scenario replay.
   try {
     const res = await fetch('/api/areas');
     if (res.ok) {
       const data = await res.json();
-      // Turn off the deletion area first.
       ws.sendCommand('AREA OFF');
       for (const name of Object.keys(
         data.shapes || {},
@@ -131,8 +132,10 @@ async function clearSimState(): Promise<void> {
     // Non-fatal.
   }
 
-  // Refresh the shared area display.
-  setTimeout(() => areaMgr.refresh(), 500);
+  // Poll a few times to catch the post-RESET state.
+  for (const delay of [200, 800, 2000]) {
+    setTimeout(() => areaMgr.refresh(), delay);
+  }
 }
 
 // ── Command handler (shared by console + panel) ─────

@@ -68,6 +68,12 @@ export class AreaManager {
     this._fetch();
   }
 
+  /** Clear all rendered areas and invalidate cache. */
+  clear(): void {
+    this.source.entities.removeAll();
+    this.lastJson = '';
+  }
+
   private async _fetch(): Promise<void> {
     try {
       const res = await fetch('/api/areas');
