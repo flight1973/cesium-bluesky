@@ -128,21 +128,21 @@ export class AircraftManager {
       } else {
         altStr = `${Math.round(altFt)}ft`;
       }
+      // Only show arrow when actually changing.
       const vsArrow =
-        vs > 0.5 ? '\u2191'
-          : vs < -0.5 ? '\u2193' : '\u2192';
+        vs > 0.5 ? ' \u2191'
+          : vs < -0.5 ? ' \u2193' : '';
 
       // ── Line 3: Speed + accel/decel arrow ────────
       const spdKts = Math.round(cas / KTS);
       const prevCas = this._prevCas.get(acid);
-      let spdArrow = '\u2192'; // → steady
+      let spdArrow = '';
       if (prevCas !== undefined) {
         const diff = cas - prevCas;
-        // Threshold: ~1 knot change per update cycle.
         if (diff > 0.3) {
-          spdArrow = '\u2191'; // ↑ accelerating
+          spdArrow = ' \u2191';
         } else if (diff < -0.3) {
-          spdArrow = '\u2193'; // ↓ decelerating
+          spdArrow = ' \u2193';
         }
       }
       this._prevCas.set(acid, cas);
@@ -169,7 +169,7 @@ export class AircraftManager {
       }
 
       const labelText =
-        `${acid}\n${altStr} ${vsArrow}\n${spdKts} ${spdArrow}`;
+        `${acid}\n${altStr}${vsArrow}\n${spdKts}${spdArrow}`;
 
       // ── Update or create point + label entity ─────
       let entity = this.entities.get(acid);
