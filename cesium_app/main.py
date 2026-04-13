@@ -23,6 +23,7 @@ from cesium_app.api import commands
 from cesium_app.api import navdata
 from cesium_app.api import scenario
 from cesium_app.api import simulation
+from cesium_app.api import state as state_api
 from cesium_app.api import traffic
 from cesium_app.config import settings
 from cesium_app.sim.bridge import SimBridge
@@ -86,6 +87,7 @@ app.include_router(traffic.router)
 app.include_router(scenario.router)
 app.include_router(navdata.router)
 app.include_router(areas.router)
+app.include_router(state_api.router)
 app.include_router(ws_streams.router)
 
 

@@ -313,8 +313,14 @@ document.addEventListener(
     switch (layer) {
       case 'trails':
         trailMgr.setVisible(visible);
-        // Also tell BlueSky sim to start/stop trails.
+        // Tell BlueSky sim to start/stop trails.
         ws.sendCommand(visible ? 'TRAIL ON' : 'TRAIL OFF');
+        if (!visible) trailMgr.clear();
+        break;
+      case 'trails-display':
+        // Backend-initiated state change — just update
+        // display, don't re-send TRAIL command.
+        trailMgr.setVisible(visible);
         if (!visible) trailMgr.clear();
         break;
       case 'routes':
@@ -383,5 +389,26 @@ cmdConsole.focus();
 
 // Check for Cesium Ion token and upgrade if available.
 applyIonConfig(viewer);
+
+// ── Backend state sync ──────────────────────────────
+// Poll /api/state every 2 seconds to keep toolbar
+// buttons in sync with actual backend state — so
+// commands issued via console, scenario file, or
+// another client are reflected in the UI.
+async function pollBackendState(): Promise<void> {
+  try {
+    const res = await fetch('/api/state');
+    if (!res.ok) return;
+    const s = await res.json();
+    toolbar.syncBackendState({
+      trails: !!s.trails_active,
+      area: !!s.area_active,
+    });
+  } catch {
+    // Non-fatal.
+  }
+}
+setInterval(pollBackendState, 2000);
+pollBackendState();
 
 console.log('BlueSky ATM Simulator initialized');

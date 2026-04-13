@@ -190,6 +190,28 @@ export class BlueSkyToolbar extends LitElement {
     this.dtmult = dtmult;
   }
 
+  /** Sync button state with actual backend flags. */
+  syncBackendState(flags: {
+    trails: boolean;
+    area: boolean;
+  }): void {
+    // Only update if different, to avoid flicker.
+    if (this.showTrails !== flags.trails) {
+      this.showTrails = flags.trails;
+      // Notify listeners so trail manager updates.
+      this.dispatchEvent(
+        new CustomEvent('toggle-layer', {
+          detail: {
+            layer: 'trails-display',
+            visible: flags.trails,
+          },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    }
+  }
+
   /** Fetch categorized scenario list from backend. */
   async loadScenarios(): Promise<void> {
     try {
