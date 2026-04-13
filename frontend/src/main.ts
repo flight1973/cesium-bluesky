@@ -194,8 +194,11 @@ document.addEventListener(
       case 'leaders':
         aircraftMgr.setLeadersVisible(visible);
         break;
-      case 'navdata':
-        navMgr.setVisible(visible);
+      case 'airports':
+        navMgr.setAirportsVisible(visible);
+        break;
+      case 'waypoints':
+        navMgr.setWaypointsVisible(visible);
         break;
     }
   }) as EventListener,

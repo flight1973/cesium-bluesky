@@ -30,7 +30,8 @@ export class NavdataManager {
   private wptSource: CustomDataSource;
   private _debounceTimer: number | null = null;
   private _lastBounds = '';
-  private _visible = true;
+  private _aptVisible = true;
+  private _wptVisible = true;
 
   constructor(private viewer: Viewer) {
     this.aptSource = new CustomDataSource('airports');
@@ -47,14 +48,22 @@ export class NavdataManager {
     this._debouncedFetch();
   }
 
-  setVisible(visible: boolean): void {
-    this._visible = visible;
+  setAirportsVisible(visible: boolean): void {
+    this._aptVisible = visible;
     this.aptSource.show = visible;
+  }
+
+  setWaypointsVisible(visible: boolean): void {
+    this._wptVisible = visible;
     this.wptSource.show = visible;
   }
 
-  get visible(): boolean {
-    return this._visible;
+  get airportsVisible(): boolean {
+    return this._aptVisible;
+  }
+
+  get waypointsVisible(): boolean {
+    return this._wptVisible;
   }
 
   private _debouncedFetch(): void {

@@ -16,7 +16,8 @@ export class BlueSkyToolbar extends LitElement {
   @state() showTrails = false;
   @state() showRoutes = true;
   @state() showLabels = true;
-  @state() showNavdata = true;
+  @state() showAirports = true;
+  @state() showWaypoints = true;
   @state() showLeaders = true;
   @state() is3D = true;
   @state() altScale = 10;
@@ -154,9 +155,13 @@ export class BlueSkyToolbar extends LitElement {
         @click=${this._toggleLeaders}
       >VEL VECTOR</button>
       <button
-        class=${this.showNavdata ? '' : 'off'}
-        @click=${this._toggleNavdata}
+        class=${this.showAirports ? '' : 'off'}
+        @click=${this._toggleAirports}
       >APT</button>
+      <button
+        class=${this.showWaypoints ? '' : 'off'}
+        @click=${this._toggleWaypoints}
+      >WPT</button>
       <div class="sep"></div>
       <button @click=${this._toggleView}>
         ${this.is3D ? '2D' : '3D'}
@@ -308,13 +313,27 @@ export class BlueSkyToolbar extends LitElement {
     );
   }
 
-  private _toggleNavdata(): void {
-    this.showNavdata = !this.showNavdata;
+  private _toggleAirports(): void {
+    this.showAirports = !this.showAirports;
     this.dispatchEvent(
       new CustomEvent('toggle-layer', {
         detail: {
-          layer: 'navdata',
-          visible: this.showNavdata,
+          layer: 'airports',
+          visible: this.showAirports,
+        },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  private _toggleWaypoints(): void {
+    this.showWaypoints = !this.showWaypoints;
+    this.dispatchEvent(
+      new CustomEvent('toggle-layer', {
+        detail: {
+          layer: 'waypoints',
+          visible: this.showWaypoints,
         },
         bubbles: true,
         composed: true,
