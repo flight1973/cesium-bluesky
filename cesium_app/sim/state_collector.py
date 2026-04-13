@@ -130,6 +130,7 @@ class StateCollector:
                 "nconf_tot": len(cd.confpairs_all),
                 "nlos_cur": len(cd.lospairs_unique),
                 "nlos_tot": len(cd.lospairs_all),
+                "translvl": float(bs.traf.translvl),
             }
 
         with self._lock:

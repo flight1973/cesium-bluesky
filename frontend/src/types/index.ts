@@ -18,6 +18,7 @@ export interface AcData {
   nconf_tot: number;
   nlos_cur: number;
   nlos_tot: number;
+  translvl: number;  // transition level in meters
 }
 
 export interface SimInfo {

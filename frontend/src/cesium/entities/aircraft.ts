@@ -80,6 +80,9 @@ export class AircraftManager {
   private _labelsVisible = true;
   private _leadersVisible = true;
 
+  // Previous CAS per aircraft for accel/decel detection.
+  private _prevCas = new Map<string, number>();
+
   constructor(private viewer: Viewer) {}
 
   /** Set altitude exaggeration factor (1 = real). */
@@ -102,6 +105,9 @@ export class AircraftManager {
       }
     }
 
+    // Transition level (meters). Default 5486m = FL180.
+    const translvl = data.translvl ?? 5486;
+
     // Add or update each aircraft.
     for (let i = 0; i < data.id.length; i++) {
       const acid = data.id[i];
@@ -114,11 +120,32 @@ export class AircraftManager {
       const vs = data.vs[i];
       const inconf = data.inconf?.[i] ?? false;
 
-      const fl = Math.round(alt / FT / 100);
-      const spdKts = Math.round(cas / KTS);
+      // ── Line 2: Altitude + climb/descend arrow ───
+      const altFt = alt / FT;
+      let altStr: string;
+      if (alt >= translvl) {
+        altStr = `FL${Math.round(altFt / 100)}`;
+      } else {
+        altStr = `${Math.round(altFt)}ft`;
+      }
       const vsArrow =
         vs > 0.5 ? '\u2191'
           : vs < -0.5 ? '\u2193' : '\u2192';
+
+      // ── Line 3: Speed + accel/decel arrow ────────
+      const spdKts = Math.round(cas / KTS);
+      const prevCas = this._prevCas.get(acid);
+      let spdArrow = '\u2192'; // → steady
+      if (prevCas !== undefined) {
+        const diff = cas - prevCas;
+        // Threshold: ~1 knot change per update cycle.
+        if (diff > 0.3) {
+          spdArrow = '\u2191'; // ↑ accelerating
+        } else if (diff < -0.3) {
+          spdArrow = '\u2193'; // ↓ decelerating
+        }
+      }
+      this._prevCas.set(acid, cas);
 
       const position = Cartesian3.fromDegrees(
         lon, lat, alt * this._altScale,
@@ -142,7 +169,7 @@ export class AircraftManager {
       }
 
       const labelText =
-        `${acid}\nFL${fl} ${vsArrow} ${spdKts}`;
+        `${acid}\n${altStr} ${vsArrow}\n${spdKts} ${spdArrow}`;
 
       // ── Update or create point + label entity ─────
       let entity = this.entities.get(acid);
@@ -250,5 +277,6 @@ export class AircraftManager {
       this.viewer.entities.remove(vv);
       this.vvEntities.delete(acid);
     }
+    this._prevCas.delete(acid);
   }
 }
