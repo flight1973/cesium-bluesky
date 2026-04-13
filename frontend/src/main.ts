@@ -125,6 +125,14 @@ areaTool.setCommandHandler(sendCommand);
 areaTool.setViewer(viewer);
 cmdConsole.loadCommandBriefs();
 
+// ── Echo events (console-only, no sim command) ──────
+document.addEventListener(
+  'echo',
+  ((e: CustomEvent) => {
+    cmdConsole.echo(e.detail.text);
+  }) as EventListener,
+);
+
 // ── Aircraft selection logic ────────────────────────
 function selectAircraft(
   acid: string | null,

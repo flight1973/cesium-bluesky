@@ -265,11 +265,23 @@ export class AreaTool extends LitElement {
       let msg = `Shapes: ${names.length > 0
           ? names.join(', ') : 'none'}`;
       msg += ` | Active: ${active || 'none'}`;
-      this.onCommand?.(`ECHO ${msg}`);
-      // Sync our button state with backend.
+      // Echo to console without sending a sim command.
+      this.dispatchEvent(
+        new CustomEvent('echo', {
+          detail: { text: msg },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+      // Sync button state with backend.
       this.areaActive = !!active;
+      if (this.areaActive) {
+        this._showActiveArea();
+      } else {
+        this._clearActiveArea();
+      }
     } catch {
-      this.onCommand?.('ECHO Area check failed');
+      // Non-fatal.
     }
   }
 
