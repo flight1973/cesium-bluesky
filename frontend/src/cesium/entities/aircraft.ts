@@ -72,9 +72,13 @@ function velocityEndpoint(
 }
 
 
+// Color for CPA conflict lines.
+const COLOR_CPA_LINE = Color.ORANGE.withAlpha(0.6);
+
 export class AircraftManager {
   private entities = new Map<string, Entity>();
   private vvEntities = new Map<string, Entity>();
+  private cpaEntities = new Map<string, Entity>();
   private selectedAcid: string | null = null;
   private _altScale = 1.0;
   private _labelsVisible = true;
@@ -229,6 +233,38 @@ export class AircraftManager {
         });
         this.vvEntities.set(acid, vvEntity);
       }
+
+      // ── CPA conflict line ─────────────────────────
+      const tcpa = data.tcpamax?.[i] ?? 0;
+      if (inconf && tcpa > 0) {
+        // Line from aircraft to predicted CPA point.
+        const cpaDist = gs * tcpa;
+        const cpaEnd = velocityEndpoint(
+          position, lon, lat, headingRad, cpaDist,
+        );
+        let cpaEntity = this.cpaEntities.get(acid);
+        if (cpaEntity) {
+          cpaEntity.show = true;
+          cpaEntity.polyline!.positions =
+            new ConstantProperty([position, cpaEnd]);
+        } else {
+          cpaEntity = this.viewer.entities.add({
+            id: `cpa-${acid}`,
+            polyline: {
+              positions: [position, cpaEnd],
+              width: 1,
+              material: COLOR_CPA_LINE,
+            },
+          });
+          this.cpaEntities.set(acid, cpaEntity);
+        }
+      } else {
+        // Hide CPA line when not in conflict.
+        const cpaEntity = this.cpaEntities.get(acid);
+        if (cpaEntity) {
+          cpaEntity.show = false;
+        }
+      }
     }
   }
 
@@ -276,6 +312,11 @@ export class AircraftManager {
     if (vv) {
       this.viewer.entities.remove(vv);
       this.vvEntities.delete(acid);
+    }
+    const cpa = this.cpaEntities.get(acid);
+    if (cpa) {
+      this.viewer.entities.remove(cpa);
+      this.cpaEntities.delete(acid);
     }
     this._prevCas.delete(acid);
   }
