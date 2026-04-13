@@ -76,6 +76,13 @@
       border-radius: 4px;
     }
 
+    /* Area tool overlays below toolbar */
+    area-tool {
+      position: absolute;
+      top: 40px; left: 8px;
+      z-index: 10;
+    }
+
     /* Camera controls overlay bottom-left of viewer */
     camera-controls {
       position: absolute;
@@ -102,6 +109,7 @@
   <div id="app">
     <div id="cesium-container">
       <bluesky-toolbar></bluesky-toolbar>
+      <area-tool></area-tool>
       <camera-controls></camera-controls>
     </div>
     <bluesky-traffic-list></bluesky-traffic-list>

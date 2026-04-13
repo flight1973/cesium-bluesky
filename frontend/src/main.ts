@@ -3,6 +3,8 @@
  * all BlueSky UI components together.
  */
 import {
+  Cartographic,
+  Ellipsoid,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
   SceneMode,
@@ -25,6 +27,7 @@ import './ui/traffic-list';
 import './ui/console';
 import './ui/aircraft-panel';
 import './ui/fms-panel';
+import './ui/area-tool';
 import './ui/camera-controls';
 
 import type { BlueSkyToolbar } from './ui/toolbar';
@@ -33,6 +36,7 @@ import type { BlueSkyTrafficList } from './ui/traffic-list';
 import type { BlueSkyConsole } from './ui/console';
 import type { AircraftPanel } from './ui/aircraft-panel';
 import type { FmsPanel } from './ui/fms-panel';
+import type { AreaTool } from './ui/area-tool';
 import type { CameraControls } from './ui/camera-controls';
 
 // ── Initialize Cesium viewer ────────────────────────
@@ -65,6 +69,9 @@ const acPanel = document.querySelector(
 const fmsPanel = document.querySelector(
   'fms-panel',
 ) as FmsPanel;
+const areaTool = document.querySelector(
+  'area-tool',
+) as AreaTool;
 const camCtrl = document.querySelector(
   'camera-controls',
 ) as CameraControls;
@@ -114,6 +121,7 @@ function sendCommand(cmd: string): void {
 cmdConsole.setCommandHandler(sendCommand);
 acPanel.setCommandHandler(sendCommand);
 fmsPanel.setCommandHandler(sendCommand);
+areaTool.setCommandHandler(sendCommand);
 cmdConsole.loadCommandBriefs();
 
 // ── Aircraft selection logic ────────────────────────
@@ -171,12 +179,39 @@ document.addEventListener(
   }) as EventListener,
 );
 
-// ── Cesium click handler → select aircraft ──────────
+// ── Cesium click handler ────────────────────────────
+// Supports normal mode (select aircraft) and drawing
+// mode (capture lat/lon for area tool).
+let drawPointCb:
+  ((lat: number, lon: number) => void) | null = null;
+let drawDoneCb: (() => void) | null = null;
+
+function globeLatLon(
+  screenPos: any,
+): { lat: number; lon: number } | null {
+  const ray = viewer.camera.getPickRay(screenPos);
+  if (!ray) return null;
+  const cart = viewer.scene.globe.pick(
+    ray, viewer.scene,
+  );
+  if (!cart) return null;
+  const carto = Cartographic.fromCartesian(cart);
+  return {
+    lat: CesiumMath.toDegrees(carto.latitude),
+    lon: CesiumMath.toDegrees(carto.longitude),
+  };
+}
+
 const handler = new ScreenSpaceEventHandler(
   viewer.scene.canvas,
 );
 handler.setInputAction(
   (click: any) => {
+    if (drawPointCb) {
+      const ll = globeLatLon(click.position);
+      if (ll) drawPointCb(ll.lat, ll.lon);
+      return;
+    }
     const picked = viewer.scene.pick(click.position);
     if (defined(picked) && picked.id?.name) {
       selectAircraft(picked.id.name);
@@ -185,6 +220,26 @@ handler.setInputAction(
     }
   },
   ScreenSpaceEventType.LEFT_CLICK,
+);
+handler.setInputAction(
+  (click: any) => {
+    if (drawDoneCb) {
+      drawDoneCb();
+    }
+  },
+  ScreenSpaceEventType.LEFT_DOUBLE_CLICK,
+);
+
+// Wire area tool drawing callbacks.
+areaTool.setDrawCallbacks(
+  (pointCb, doneCb) => {
+    drawPointCb = pointCb;
+    drawDoneCb = doneCb;
+  },
+  () => {
+    drawPointCb = null;
+    drawDoneCb = null;
+  },
 );
 
 // ── Layer toggle events ─────────────────────────────
