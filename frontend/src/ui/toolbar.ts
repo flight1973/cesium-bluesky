@@ -227,6 +227,13 @@ export class BlueSkyToolbar extends LitElement {
 
   private async _reset(): Promise<void> {
     await api.simReset();
+    // Notify app to clear all client-side state.
+    this.dispatchEvent(
+      new CustomEvent('sim-reset', {
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private async _onSpeed(e: Event): Promise<void> {

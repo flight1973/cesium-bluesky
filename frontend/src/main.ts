@@ -104,6 +104,37 @@ ws.on('TRAILS', (data: TrailData) => {
   trailMgr.addSegments(data);
 });
 
+// ── Client-side cleanup for RESET / IC ─────────────
+async function clearSimState(): Promise<void> {
+  trailMgr.clear();
+  routeMgr.clear();
+  acPanel.hide();
+  fmsPanel.close();
+  aircraftMgr.select(null);
+
+  // Also clear all defined areas from the sim — RESET
+  // clears them in theory but can race with re-running
+  // scenario commands.  Explicitly delete each shape.
+  try {
+    const res = await fetch('/api/areas');
+    if (res.ok) {
+      const data = await res.json();
+      // Turn off the deletion area first.
+      ws.sendCommand('AREA OFF');
+      for (const name of Object.keys(
+        data.shapes || {},
+      )) {
+        ws.sendCommand(`DEL ${name}`);
+      }
+    }
+  } catch {
+    // Non-fatal.
+  }
+
+  // Refresh the shared area display.
+  setTimeout(() => areaMgr.refresh(), 500);
+}
+
 // ── Command handler (shared by console + panel) ─────
 function sendCommand(cmd: string): void {
   ws.sendCommand(cmd);
@@ -115,10 +146,7 @@ function sendCommand(cmd: string): void {
     upper === 'RESET'
     || upper.startsWith('IC ')
   ) {
-    trailMgr.clear();
-    routeMgr.clear();
-    acPanel.hide();
-    aircraftMgr.select(null);
+    clearSimState();
   }
 }
 cmdConsole.setCommandHandler(sendCommand);
@@ -133,6 +161,15 @@ document.addEventListener(
   'echo',
   ((e: CustomEvent) => {
     cmdConsole.echo(e.detail.text);
+  }) as EventListener,
+);
+
+// ── RESET button → clear all client state ───────────
+document.addEventListener(
+  'sim-reset',
+  (() => {
+    cmdConsole.echo('RESET');
+    clearSimState();
   }) as EventListener,
 );
 
