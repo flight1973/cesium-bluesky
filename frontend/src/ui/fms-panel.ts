@@ -59,7 +59,7 @@ export class FmsPanel extends LitElement {
       font-size: 12px;
       border-left: 1px solid #333;
       overflow-y: auto;
-      width: 320px;
+      width: 400px;
       height: 100%;
     }
     :host([hidden]) { display: none; }
