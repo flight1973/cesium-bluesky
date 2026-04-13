@@ -41,6 +41,9 @@ export class AreaTool extends LitElement {
   private onStopDraw: (() => void) | null = null;
   private viewer: Viewer | null = null;
   private previewEntity: Entity | null = null;
+  private activeEntity: Entity | null = null;
+  private lastDrawnPoints: LatLon[] = [];
+  private lastDrawnMode: DrawMode = 'off';
 
   static styles = css`
     :host {
@@ -232,9 +235,14 @@ export class AreaTool extends LitElement {
       this.onCommand?.(`POLY ${name},${coords}`);
     }
 
+    // Save the drawn shape for persistent display.
+    this.lastDrawnPoints = [...this.points];
+    this.lastDrawnMode = this.mode;
+
     setTimeout(() => {
       this.onCommand?.(`AREA ${name}`);
       this.areaActive = true;
+      this._showActiveArea();
     }, 300);
 
     this.mode = 'off';
@@ -247,10 +255,12 @@ export class AreaTool extends LitElement {
     if (this.areaActive) {
       this.onCommand?.('AREA OFF');
       this.areaActive = false;
+      this._clearActiveArea();
     } else {
       const name = this.areaName || 'SIMAREA';
       this.onCommand?.(`AREA ${name}`);
       this.areaActive = true;
+      this._showActiveArea();
     }
   }
 
@@ -312,6 +322,55 @@ export class AreaTool extends LitElement {
     if (this.previewEntity && this.viewer) {
       this.viewer.entities.remove(this.previewEntity);
       this.previewEntity = null;
+    }
+  }
+
+  // ── Persistent active area display ────────────────
+
+  private _showActiveArea(): void {
+    if (!this.viewer || this.lastDrawnPoints.length < 2) {
+      return;
+    }
+    this._clearActiveArea();
+
+    let coords: number[];
+    if (
+      this.lastDrawnMode === 'box'
+      && this.lastDrawnPoints.length >= 2
+    ) {
+      const a = this.lastDrawnPoints[0];
+      const b = this.lastDrawnPoints[1];
+      coords = [
+        a.lon, a.lat,
+        b.lon, a.lat,
+        b.lon, b.lat,
+        a.lon, b.lat,
+      ];
+    } else {
+      coords = [];
+      for (const p of this.lastDrawnPoints) {
+        coords.push(p.lon, p.lat);
+      }
+    }
+
+    const positions =
+      Cartesian3.fromDegreesArray(coords);
+
+    this.activeEntity = this.viewer.entities.add({
+      polygon: {
+        hierarchy: new PolygonHierarchy(positions),
+        material: new Color(0, 1, 0, 0.08),
+        outline: true,
+        outlineColor: new Color(0, 1, 0, 0.6),
+        outlineWidth: 2,
+      },
+    });
+  }
+
+  private _clearActiveArea(): void {
+    if (this.activeEntity && this.viewer) {
+      this.viewer.entities.remove(this.activeEntity);
+      this.activeEntity = null;
     }
   }
 }
