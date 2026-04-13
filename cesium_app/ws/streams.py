@@ -17,6 +17,11 @@ _last_acdata_seq: int = 0
 _last_trails_seq: int = 0
 _last_siminfo_seq: int = 0
 
+# Pending command log entries to broadcast on next tick.
+# Populated by the bridge's command listener (sync thread),
+# drained by the async broadcast loop.
+_cmdlog_pending: list[dict] = []
+
 
 @router.websocket("/ws/sim")
 async def websocket_sim(ws: WebSocket) -> None:
@@ -101,14 +106,30 @@ async def broadcast_loop(app: FastAPI) -> None:
     bridge: SimBridge = app.state.bridge
     collector = bridge.collector
 
+    # Register a listener for command log entries — called
+    # in the sim thread; we just append to a list for the
+    # async broadcast loop to drain.
+    def _cmd_listener(entry: dict) -> None:
+        _cmdlog_pending.append(entry)
+
+    bridge.add_command_listener(_cmd_listener)
+
     while True:
         await asyncio.sleep(0.05)  # 20 Hz poll
 
         try:
             if manager.client_count == 0:
+                # Drop pending cmdlog entries when nobody
+                # is listening (avoid unbounded growth).
+                _cmdlog_pending.clear()
                 continue
 
             latest = collector.get_latest()
+
+            # CMDLOG -- drain pending entries
+            while _cmdlog_pending:
+                entry = _cmdlog_pending.pop(0)
+                await manager.broadcast("CMDLOG", entry)
 
             # ACDATA -- 5 Hz
             if (

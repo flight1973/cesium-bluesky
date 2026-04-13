@@ -48,7 +48,7 @@ class ConnectionManager:
         """Accept a WebSocket and register default subs."""
         await ws.accept()
         self._connections[ws] = {
-            "ACDATA", "SIMINFO", "TRAILS",
+            "ACDATA", "SIMINFO", "TRAILS", "CMDLOG",
         }
         logger.info(
             "WebSocket client connected (%d total)",

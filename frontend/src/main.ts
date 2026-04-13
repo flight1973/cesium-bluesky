@@ -104,6 +104,11 @@ ws.on('TRAILS', (data: TrailData) => {
   trailMgr.addSegments(data);
 });
 
+// ── Wire CMDLOG → console server tab ────────────────
+ws.on('CMDLOG', (entry: any) => {
+  cmdConsole.addLogEntry(entry);
+});
+
 // ── Client-side cleanup for RESET / IC ─────────────
 async function clearSimState(): Promise<void> {
   trailMgr.clear();
@@ -158,6 +163,7 @@ fmsPanel.setCommandHandler(sendCommand);
 areaTool.setCommandHandler(sendCommand);
 areaTool.setViewer(viewer);
 cmdConsole.loadCommandBriefs();
+cmdConsole.loadInitialLog();
 
 // ── Echo events (console-only, no sim command) ──────
 document.addEventListener(

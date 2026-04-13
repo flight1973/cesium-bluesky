@@ -25,9 +25,20 @@ interface CmdInfo {
   aliases?: string[];
 }
 
+interface LogEntry {
+  simt: number;
+  utc: string;
+  sender: string;
+  command: string;
+}
+
+type TabName = 'console' | 'server';
+
 @customElement('bluesky-console')
 export class BlueSkyConsole extends LitElement {
   @state() private outputLines: string[] = [];
+  @state() private serverLog: LogEntry[] = [];
+  @state() private activeTab: TabName = 'console';
   @state() private inputValue = '';
   @state() private hintText = '';
   @query('#cmd-input') private inputEl!: HTMLInputElement;
@@ -37,6 +48,7 @@ export class BlueSkyConsole extends LitElement {
   private commandMem = '';
   private cmdBriefs = new Map<string, string>();
   private onCommand: ((cmd: string) => void) | null = null;
+  private _maxServerLines = 500;
 
   static styles = css`
     :host {
@@ -48,6 +60,37 @@ export class BlueSkyConsole extends LitElement {
       border-top: 1px solid #333;
       height: 100%;
       overflow: hidden;
+    }
+
+    /* Tab bar */
+    .tabs {
+      display: flex;
+      background: #111;
+      border-bottom: 1px solid #333;
+      flex-shrink: 0;
+    }
+    .tab {
+      padding: 4px 12px;
+      color: #888;
+      cursor: pointer;
+      font-size: 11px;
+      border-right: 1px solid #222;
+      user-select: none;
+    }
+    .tab:hover {
+      color: #00ff00;
+      background: #1a1a1a;
+    }
+    .tab.active {
+      color: #00ff00;
+      background: #1a1a1a;
+      border-bottom: 1px solid #00ff00;
+      margin-bottom: -1px;
+    }
+    .tab .badge {
+      color: #ffa000;
+      font-size: 10px;
+      margin-left: 4px;
     }
 
     /* Output area -- matches Qt Stackwin */
@@ -62,6 +105,37 @@ export class BlueSkyConsole extends LitElement {
     }
     .stackwin .echo-line {
       display: block;
+    }
+
+    /* Server log */
+    .server-log {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 8px;
+      color: #aaa;
+      line-height: 1.3;
+      font-size: 12px;
+    }
+    .server-log .entry {
+      display: flex;
+      gap: 8px;
+      padding: 1px 0;
+      border-bottom: 1px solid #1a1a1a;
+    }
+    .server-log .simt {
+      color: #666;
+      min-width: 62px;
+      flex-shrink: 0;
+    }
+    .server-log .sender {
+      color: #888;
+      min-width: 60px;
+      flex-shrink: 0;
+    }
+    .server-log .command {
+      color: #00ff00;
+      flex: 1;
+      word-break: break-all;
     }
 
     /* Command line -- matches Qt Cmdline with >> prompt */
@@ -107,25 +181,58 @@ export class BlueSkyConsole extends LitElement {
 
   render() {
     return html`
-      <div class="stackwin" id="stackwin">
-        ${this.outputLines.map(
-          (line) => html`<span class="echo-line">${line}</span>`,
-        )}
-      </div>
-      <div class="cmdline">
-        <span class="prompt">&gt;&gt;</span>
-        <div class="input-wrap">
-          <input
-            id="cmd-input"
-            .value=${this.inputValue}
-            @input=${this._onInput}
-            @keydown=${this._onKeyDown}
-            spellcheck="false"
-            autocomplete="off"
-          />
-          <span class="hint">${this.hintText}</span>
+      <div class="tabs">
+        <div
+          class="tab ${this.activeTab === 'console' ? 'active' : ''}"
+          @click=${() => this._setTab('console')}
+        >CONSOLE</div>
+        <div
+          class="tab ${this.activeTab === 'server' ? 'active' : ''}"
+          @click=${() => this._setTab('server')}
+        >SERVER LOG
+          <span class="badge">${this.serverLog.length}</span>
         </div>
       </div>
+
+      ${this.activeTab === 'console' ? html`
+        <div class="stackwin" id="stackwin">
+          ${this.outputLines.map(
+            (line) => html`
+              <span class="echo-line">${line}</span>
+            `,
+          )}
+        </div>
+        <div class="cmdline">
+          <span class="prompt">&gt;&gt;</span>
+          <div class="input-wrap">
+            <input
+              id="cmd-input"
+              .value=${this.inputValue}
+              @input=${this._onInput}
+              @keydown=${this._onKeyDown}
+              spellcheck="false"
+              autocomplete="off"
+            />
+            <span class="hint">${this.hintText}</span>
+          </div>
+        </div>
+      ` : html`
+        <div class="server-log" id="serverlog">
+          ${this.serverLog.map(
+            (e) => html`
+              <div class="entry">
+                <span class="simt">
+                  t=${e.simt.toFixed(1)}
+                </span>
+                <span class="sender">
+                  ${e.sender}
+                </span>
+                <span class="command">${e.command}</span>
+              </div>
+            `,
+          )}
+        </div>
+      `}
     `;
   }
 
@@ -173,6 +280,44 @@ export class BlueSkyConsole extends LitElement {
   /** Focus the command input. */
   focus(): void {
     this.updateComplete.then(() => this.inputEl?.focus());
+  }
+
+  /** Add a single entry to the server command log tab. */
+  addLogEntry(entry: LogEntry): void {
+    const next = [...this.serverLog, entry];
+    if (next.length > this._maxServerLines) {
+      next.splice(0, next.length - this._maxServerLines);
+    }
+    this.serverLog = next;
+    // Auto-scroll if viewing server tab.
+    if (this.activeTab === 'server') {
+      this.updateComplete.then(() => {
+        const el =
+          this.renderRoot.querySelector('#serverlog');
+        if (el) el.scrollTop = el.scrollHeight;
+      });
+    }
+  }
+
+  /** Load initial backlog from the server. */
+  async loadInitialLog(): Promise<void> {
+    try {
+      const res = await fetch('/api/cmdlog?limit=200');
+      if (!res.ok) return;
+      const entries: LogEntry[] = await res.json();
+      this.serverLog = entries;
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  private _setTab(tab: TabName): void {
+    this.activeTab = tab;
+    if (tab === 'console') {
+      this.updateComplete.then(() =>
+        this.inputEl?.focus()
+      );
+    }
   }
 
   // ── Private ───────────────────────────────────────

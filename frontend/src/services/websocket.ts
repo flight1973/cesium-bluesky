@@ -62,7 +62,9 @@ export class SimWebSocket {
       console.log('[WS] Connected');
       this.reconnectDelay = 1000;
       // Subscribe to all topics on connect
-      this.subscribe(['ACDATA', 'SIMINFO', 'TRAILS']);
+      this.subscribe([
+        'ACDATA', 'SIMINFO', 'TRAILS', 'CMDLOG',
+      ]);
     };
 
     this.ws.onmessage = (event: MessageEvent) => {

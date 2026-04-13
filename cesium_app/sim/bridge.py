@@ -5,9 +5,12 @@ runs the simulation loop in a daemon thread, and exposes methods for
 queuing commands and reading state that are safe to call from
 FastAPI's async handlers.
 """
+import collections
+import datetime
 import logging
 from pathlib import Path
 import threading
+from typing import Any, Callable
 
 import bluesky as bs
 from bluesky.core.walltime import Timer
@@ -28,6 +31,15 @@ _STATE_NAMES: dict[int, str] = {
 def _state_name(state: int) -> str:
     """Convert a numeric simulation state to its name."""
     return _STATE_NAMES.get(state, f"UNKNOWN({state})")
+
+
+def _sender_label(sender_id: object) -> str:
+    """Format a sender id (bytes or None) for display."""
+    if sender_id is None:
+        return "local"
+    if isinstance(sender_id, bytes):
+        return sender_id.hex()[:8]
+    return str(sender_id)
 
 
 class SimBridge:
@@ -57,6 +69,14 @@ class SimBridge:
         self._initialized = False
         self.collector = StateCollector()
 
+        # Rolling log of commands submitted to the stack.
+        # Captured from ALL sources: REST, WS, scenario files.
+        self._cmd_log: collections.deque = collections.deque(
+            maxlen=500,
+        )
+        self._cmd_log_lock = threading.Lock()
+        self._cmd_listeners: list[Callable[[dict], Any]] = []
+
     def start(self) -> None:
         """Initialize BlueSky and start the sim loop thread."""
         if self._thread is not None and self._thread.is_alive():
@@ -79,6 +99,7 @@ class SimBridge:
         )
         self._initialized = True
         self.collector.install()
+        self._install_command_log_hook()
 
         self._thread = threading.Thread(
             target=self._run_loop,
@@ -277,6 +298,90 @@ class SimBridge:
             self._thread is not None
             and self._thread.is_alive()
         )
+
+    # ── Command log ──────────────────────────────────────
+
+    def get_command_log(
+        self,
+        limit: int = 100,
+    ) -> list[dict]:
+        """Return the most recent N log entries."""
+        with self._cmd_log_lock:
+            items = list(self._cmd_log)
+        return items[-limit:]
+
+    def add_command_listener(
+        self,
+        cb: Callable[[dict], Any],
+    ) -> None:
+        """Register a callback invoked on each logged cmd."""
+        self._cmd_listeners.append(cb)
+
+    def remove_command_listener(
+        self,
+        cb: Callable[[dict], Any],
+    ) -> None:
+        """Remove a listener callback."""
+        if cb in self._cmd_listeners:
+            self._cmd_listeners.remove(cb)
+
+    def _install_command_log_hook(self) -> None:
+        """Patch bluesky.stack.stack to log all commands.
+
+        Every command submitted to the stack — via REST, WS,
+        scenario files, or internal BlueSky code — flows
+        through bluesky.stack.stack().  We wrap it to log
+        each command with its sender_id and simt.
+        """
+        from bluesky import stack as bs_stack
+
+        original_stack = bs_stack.stack
+        bridge_self = self
+
+        def wrapped_stack(*cmdlines: str, sender_id=None):
+            for cmdline in cmdlines:
+                cleaned = (cmdline or "").strip()
+                if not cleaned:
+                    continue
+                for line in cleaned.split(";"):
+                    line = line.strip()
+                    if line:
+                        bridge_self._record_command(
+                            line, sender_id,
+                        )
+            return original_stack(
+                *cmdlines, sender_id=sender_id,
+            )
+
+        bs_stack.stack = wrapped_stack
+
+    def _record_command(
+        self,
+        cmd: str,
+        sender_id: object,
+    ) -> None:
+        """Add a command to the rolling log and notify."""
+        entry = {
+            "simt": float(bs.sim.simt),
+            "utc": datetime.datetime.utcnow().isoformat(
+                timespec="seconds",
+            ),
+            "sender": (
+                _sender_label(sender_id)
+            ),
+            "command": cmd,
+        }
+        with self._cmd_log_lock:
+            self._cmd_log.append(entry)
+
+        # Notify listeners (e.g. WS broadcaster).
+        for cb in list(self._cmd_listeners):
+            try:
+                cb(entry)
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.warning(
+                    "Command listener failed: %s", exc,
+                )
 
     # ── Private ──────────────────────────────────────────
 
