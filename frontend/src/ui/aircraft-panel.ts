@@ -251,6 +251,12 @@ export class AircraftPanel extends LitElement {
             class="toggle-btn on"
             @click=${() => this._openFms()}
           >FMS</button>
+          <button
+            class="toggle-btn on"
+            @click=${() => this._pilotView(d.acid)}
+            title="Camera behind the aircraft looking
+              along flight path"
+          >PILOT VIEW</button>
         </div>
       </div>
 
@@ -314,6 +320,16 @@ export class AircraftPanel extends LitElement {
     this.dispatchEvent(
       new CustomEvent('open-fms', {
         detail: { acid: this.detail.acid },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  private _pilotView(acid: string): void {
+    this.dispatchEvent(
+      new CustomEvent('pilot-view', {
+        detail: { acid },
         bubbles: true,
         composed: true,
       }),

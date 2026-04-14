@@ -4,11 +4,15 @@
  */
 import {
   Cartographic,
+  Cartesian3,
   Ellipsoid,
+  Matrix4,
   ScreenSpaceEventHandler,
   ScreenSpaceEventType,
   SceneMode,
   HeadingPitchRange,
+  HeadingPitchRoll,
+  Transforms,
   Math as CesiumMath,
   defined,
 } from 'cesium';
@@ -290,6 +294,79 @@ document.addEventListener(
   'open-scenario-editor',
   (() => {
     scenarioEditor.open();
+  }) as EventListener,
+);
+
+// ── Pilot view camera tracking ──────────────────────
+// Camera sits a few meters behind and above the
+// selected aircraft, looking forward along its heading.
+// Toggles off if clicked again or when aircraft leaves.
+let pilotViewAcid: string | null = null;
+
+function updatePilotViewCamera(): void {
+  if (!pilotViewAcid) return;
+  const state = aircraftMgr.getAircraftState(
+    pilotViewAcid,
+  );
+  if (!state) {
+    pilotViewAcid = null;
+    return;
+  }
+
+  const scale = aircraftMgr.altScale;
+  const altM = state.alt * scale;
+  const headingRad = CesiumMath.toRadians(state.trk);
+
+  // Camera offset in ENU: 150m behind, 25m above.
+  const behind = 150;
+  const above = 25;
+  const east = -Math.sin(headingRad) * behind;
+  const north = -Math.cos(headingRad) * behind;
+
+  // Transform offset to world coordinates via ENU frame.
+  const aircraftPos = Cartesian3.fromDegrees(
+    state.lon, state.lat, altM,
+  );
+  const enu = Transforms.eastNorthUpToFixedFrame(
+    aircraftPos,
+  );
+  const localOffset = new Cartesian3(
+    east, north, above,
+  );
+  const camPos = new Cartesian3();
+  Matrix4.multiplyByPoint(enu, localOffset, camPos);
+
+  viewer.camera.setView({
+    destination: camPos,
+    orientation: new HeadingPitchRoll(
+      headingRad,
+      CesiumMath.toRadians(-5),
+      0,
+    ),
+  });
+}
+
+// Update pilot view every frame the viewer renders.
+viewer.scene.preRender.addEventListener(
+  updatePilotViewCamera,
+);
+
+document.addEventListener(
+  'pilot-view',
+  ((e: CustomEvent) => {
+    const acid = e.detail.acid;
+    if (pilotViewAcid === acid) {
+      // Toggle off
+      pilotViewAcid = null;
+      cmdConsole.echo(
+        `Pilot view: off (${acid})`,
+      );
+    } else {
+      pilotViewAcid = acid;
+      cmdConsole.echo(
+        `Pilot view: ${acid}`,
+      );
+    }
   }) as EventListener,
 );
 

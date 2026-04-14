@@ -95,6 +95,15 @@ export class AircraftManager {
   // Previous CAS per aircraft for accel/decel detection.
   private _prevCas = new Map<string, number>();
 
+  // Last known position/heading per aircraft for
+  // pilot-view camera tracking (always unscaled alts).
+  private _lastState = new Map<string, {
+    lat: number;
+    lon: number;
+    alt: number;
+    trk: number;
+  }>();
+
   constructor(private viewer: Viewer) {}
 
   /** Set altitude exaggeration factor (1 = real). */
@@ -159,6 +168,7 @@ export class AircraftManager {
         }
       }
       this._prevCas.set(acid, cas);
+      this._lastState.set(acid, { lat, lon, alt, trk });
 
       const position = Cartesian3.fromDegrees(
         lon, lat, alt * this._altScale,
@@ -382,6 +392,22 @@ export class AircraftManager {
     return this.entities.size;
   }
 
+  /** Look up the Cesium Entity for an aircraft. */
+  getEntity(acid: string): Entity | null {
+    return this.entities.get(acid) ?? null;
+  }
+
+  /** Get last-known position data (for pilot view). */
+  getAircraftState(acid: string): {
+    lat: number;
+    lon: number;
+    alt: number;
+    trk: number;
+  } | null {
+    const state = this._lastState.get(acid);
+    return state ?? null;
+  }
+
   /** Remove all aircraft entities (for RESET / IC). */
   clearAll(): void {
     const ids = Array.from(this.entities.keys());
@@ -413,5 +439,6 @@ export class AircraftManager {
       this.pzEntities.delete(acid);
     }
     this._prevCas.delete(acid);
+    this._lastState.delete(acid);
   }
 }
