@@ -42,6 +42,7 @@ export class AreaTool extends LitElement {
   private previewEntity: Entity | null = null;
 
   static styles = css`
+    :host([hidden]) { display: none !important; }
     :host {
       display: flex;
       align-items: center;
