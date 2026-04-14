@@ -394,10 +394,48 @@ class SimBridge:
         logger.info("Sim loop starting")
         self._started.set()
 
+        # Stub out UI-only ScreenIO methods that the
+        # headless ScreenIO class doesn't implement.
+        # Built-in scenarios use zoom (+++/---) and pan
+        # which would otherwise crash the sim thread.
+        self._stub_screen_methods()
+
         while bs.sim.state != bs.END:
-            Timer.update_timers()
-            bs.net.update()
-            bs.sim.update()
-            bs.scr.update()
+            try:
+                Timer.update_timers()
+                bs.net.update()
+                bs.sim.update()
+                bs.scr.update()
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.error(
+                    "Sim loop iteration failed: %s",
+                    exc, exc_info=True,
+                )
+                # Brief sleep to avoid tight error loop.
+                import time as _time
+                _time.sleep(0.1)
 
         logger.info("Sim loop exited")
+
+    def _stub_screen_methods(self) -> None:
+        """Add no-op stubs for UI-only ScreenIO methods.
+
+        BlueSky's stack has commands like PAN and ZOOM
+        (+++, ---) that call methods on bs.scr which
+        only exist on GUI Screens, not the headless
+        ScreenIO. Stub them so those commands don't
+        crash the sim loop.
+        """
+        scr = bs.scr
+
+        def _noop(*_args, **_kwargs):
+            return True
+
+        for method in (
+            'zoom', 'pan', 'panzoom', 'setpan',
+            'setzoom', 'cmdline', 'feature',
+            'filteralt', 'objappend', 'show_file_dialog',
+            'show_cmd_doc',
+        ):
+            if not hasattr(scr, method):
+                setattr(scr, method, _noop)
