@@ -103,11 +103,43 @@ class StateCollector:
                 "alt": [], "tas": [], "cas": [],
                 "gs": [], "trk": [], "vs": [],
                 "inconf": [], "inlos": [],
+                "bank": [], "bank_limit": [],
                 "nconf_cur": 0, "nconf_tot": 0,
                 "nlos_cur": 0, "nlos_tot": 0,
             }
         else:
+            import numpy as np
             cd = bs.traf.cd
+            ap = bs.traf.ap
+
+            # Derive bank angle from BlueSky's turn model:
+            # - bank = turnphi (or bankdef) when turning
+            # - bank = 0 when flying straight
+            # Sign: positive = right bank, negative = left
+            try:
+                eps = getattr(bs.traf, 'eps', 1e-6)
+                turnphi = ap.turnphi
+                bankdef = ap.bankdef
+                phi_abs = np.where(
+                    turnphi > eps * eps,
+                    turnphi, bankdef,
+                )
+                # Sign from heading delta towards target.
+                delhdg = (
+                    (ap.hdg - bs.traf.hdg + 180) % 360
+                    - 180
+                )
+                sign = np.sign(delhdg)
+                swhdg = bs.traf.swhdgsel
+                bank_rad = phi_abs * sign * swhdg
+                bank_deg = np.degrees(bank_rad).tolist()
+                bank_limit_deg = np.degrees(
+                    bankdef,
+                ).tolist()
+            except (AttributeError, TypeError):
+                bank_deg = [0.0] * bs.traf.ntraf
+                bank_limit_deg = [25.0] * bs.traf.ntraf
+
             # Build inlos[i]: true if aircraft i is in any
             # loss-of-separation pair this timestep.
             los_ids: set = set()
@@ -134,6 +166,8 @@ class StateCollector:
                     cd, "inconf"
                 ),
                 "inlos": inlos,
+                "bank": bank_deg,
+                "bank_limit": bank_limit_deg,
                 "tcpamax": self._safe_tolist(
                     cd, "tcpamax"
                 ),

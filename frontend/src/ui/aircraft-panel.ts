@@ -46,6 +46,8 @@ interface AircraftDetail {
   sel_vs: number;
   lnav: boolean;
   vnav: boolean;
+  bank?: number;
+  bank_limit?: number;
   route: {
     iactwp: number;
     wpname: string[];
@@ -231,6 +233,14 @@ export class AircraftPanel extends LitElement {
           'vs-input', `${Math.round(d.sel_vs / FT * 60)}`,
           (v) => this._send(`VS ${d.acid} ${v}`),
         )}
+        ${d.bank !== undefined ? html`
+          <div class="field-row">
+            <span class="field-label">BANK</span>
+            <span class="field-value">${
+              this._fmtBank(d.bank, d.bank_limit)
+            }</span>
+          </div>
+        ` : nothing}
       </div>
 
       <div class="section">
@@ -420,6 +430,22 @@ export class AircraftPanel extends LitElement {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
+  }
+
+  /** Format bank angle with direction arrow and limit. */
+  private _fmtBank(
+    bank: number,
+    limit: number | undefined,
+  ): string {
+    const rounded = Math.round(bank);
+    const abs = Math.abs(rounded);
+    const dir = rounded > 0 ? '\u21BB R'
+      : rounded < 0 ? '\u21BA L' : 'level';
+    const limStr = limit !== undefined
+      ? ` (max ${Math.round(limit)}\u00B0)`
+      : '';
+    if (abs === 0) return `0\u00B0 level${limStr}`;
+    return `${abs}\u00B0 ${dir}${limStr}`;
   }
 
   private _fieldRow(

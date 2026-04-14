@@ -13,6 +13,8 @@ export interface AcData {
   vs: number[];    // m/s
   inconf: boolean[];
   inlos: boolean[];
+  bank?: number[];
+  bank_limit?: number[];
   tcpamax?: number[];
   rpz?: number[];
   hpz?: number[];

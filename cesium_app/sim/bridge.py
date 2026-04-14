@@ -33,6 +33,43 @@ def _state_name(state: int) -> str:
     return _STATE_NAMES.get(state, f"UNKNOWN({state})")
 
 
+def _compute_bank_deg(idx: int) -> float:
+    """Current bank angle in degrees (signed).
+
+    Positive = right bank, negative = left.  Returns 0
+    when the aircraft is not turning.
+    """
+    try:
+        import numpy as np
+        ap = bs.traf.ap
+        eps = getattr(bs.traf, 'eps', 1e-6)
+        phi = (
+            ap.turnphi[idx] if ap.turnphi[idx]
+            > eps * eps else ap.bankdef[idx]
+        )
+        delhdg = (
+            (ap.hdg[idx] - bs.traf.hdg[idx] + 180)
+            % 360 - 180
+        )
+        sign = 1 if delhdg > 0 else -1 if delhdg < 0 else 0
+        if not bool(bs.traf.swhdgsel[idx]):
+            return 0.0
+        return float(np.degrees(phi) * sign)
+    except (AttributeError, IndexError):
+        return 0.0
+
+
+def _compute_bank_limit_deg(idx: int) -> float:
+    """Configured bank limit for this aircraft, in degrees."""
+    try:
+        import numpy as np
+        return float(
+            np.degrees(bs.traf.ap.bankdef[idx]),
+        )
+    except (AttributeError, IndexError):
+        return 25.0
+
+
 def _sender_label(sender_id: object) -> str:
     """Format a sender id (bytes or None) for display."""
     if sender_id is None:
@@ -254,6 +291,8 @@ class SimBridge:
             "sel_vs": float(ap.vs[idx]),
             "lnav": bool(bs.traf.swlnav[idx]),
             "vnav": bool(bs.traf.swvnav[idx]),
+            "bank": _compute_bank_deg(idx),
+            "bank_limit": _compute_bank_limit_deg(idx),
             "route": {
                 "iactwp": route.iactwp,
                 "wpname": list(route.wpname),
