@@ -29,6 +29,8 @@ export class AreaTool extends LitElement {
   @state() private points: LatLon[] = [];
   @state() private areaName = 'SIMAREA';
   @state() private areaActive = false;
+  @state() private topInput = '';
+  @state() private bottomInput = '';
 
   private onCommand:
     ((cmd: string) => void) | null = null;
@@ -91,6 +93,9 @@ export class AreaTool extends LitElement {
       border-color: #00ff00;
       outline: none;
     }
+    input.alt-input {
+      width: 55px;
+    }
     .sep {
       width: 1px;
       height: 18px;
@@ -130,6 +135,26 @@ export class AreaTool extends LitElement {
         .value=${this.areaName}
         @input=${(e: Event) => {
           this.areaName =
+            (e.target as HTMLInputElement).value;
+        }}
+      />
+      <label>Top:</label>
+      <input
+        class="alt-input"
+        .value=${this.topInput}
+        placeholder="FL/ft"
+        @input=${(e: Event) => {
+          this.topInput =
+            (e.target as HTMLInputElement).value;
+        }}
+      />
+      <label>Bot:</label>
+      <input
+        class="alt-input"
+        .value=${this.bottomInput}
+        placeholder="FL/ft"
+        @input=${(e: Event) => {
+          this.bottomInput =
             (e.target as HTMLInputElement).value;
         }}
       />
@@ -212,12 +237,14 @@ export class AreaTool extends LitElement {
 
     if (this.mode === 'box' && this.points.length >= 2) {
       const p = this.points;
+      const altSuffix = this._altSuffix();
       this.onCommand?.(
         `BOX ${name},` +
         `${p[0].lat.toFixed(6)},` +
         `${p[0].lon.toFixed(6)},` +
         `${p[1].lat.toFixed(6)},` +
-        `${p[1].lon.toFixed(6)}`,
+        `${p[1].lon.toFixed(6)}` +
+        altSuffix,
       );
     } else if (
       this.mode === 'poly' && this.points.length >= 3
@@ -228,7 +255,18 @@ export class AreaTool extends LitElement {
             `${p.lat.toFixed(6)},${p.lon.toFixed(6)}`,
         )
         .join(',');
-      this.onCommand?.(`POLY ${name},${coords}`);
+      const top = this.topInput.trim();
+      const bot = this.bottomInput.trim();
+      if (top || bot) {
+        // POLYALT name,top,bottom,lat,lon,...
+        const t = top || '100000';
+        const b = bot || '0';
+        this.onCommand?.(
+          `POLYALT ${name},${t},${b},${coords}`,
+        );
+      } else {
+        this.onCommand?.(`POLY ${name},${coords}`);
+      }
     }
 
     // Activate as deletion area.
@@ -242,6 +280,21 @@ export class AreaTool extends LitElement {
     this.points = [];
     this._clearPreview();
     this.onStopDraw?.();
+  }
+
+  /**
+   * Build the optional ",top,bottom" suffix for BOX.
+   *
+   * Accepts raw values like "FL350", "35000", "1000ft"
+   * — BlueSky's altitude parser handles the units.
+   */
+  private _altSuffix(): string {
+    const top = this.topInput.trim();
+    const bot = this.bottomInput.trim();
+    if (!top && !bot) return '';
+    const t = top || '100000';
+    const b = bot || '0';
+    return `,${t},${b}`;
   }
 
   // ── Area state ────────────────────────────────────
