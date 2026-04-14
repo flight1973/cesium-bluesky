@@ -381,6 +381,7 @@ document.addEventListener(
     aircraftMgr.setAltScale(scale);
     routeMgr.setAltScale(scale);
     trailMgr.setAltScale(scale);
+    areaMgr.setAltScale(scale);
   }) as EventListener,
 );
 
@@ -388,6 +389,7 @@ document.addEventListener(
 aircraftMgr.setAltScale(10);
 routeMgr.setAltScale(10);
 trailMgr.setAltScale(10);
+areaMgr.setAltScale(10);
 
 // ── Start ───────────────────────────────────────────
 ws.connect();

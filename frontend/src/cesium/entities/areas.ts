@@ -1,23 +1,32 @@
 /**
  * Area entity manager — syncs area boundaries from the
- * backend and renders them on the globe.
+ * backend and renders them as 3D extruded volumes.
  *
- * Polls GET /api/areas every few seconds and draws all
- * defined shapes.  The active deletion area is drawn in
- * green; inactive shapes are drawn in grey.  Works
- * regardless of which client created the area.
+ * Full vertical columns (no top/bottom set on the sim
+ * side) extend from the surface up to the Kármán line
+ * (100 km = internationally recognized edge of space).
+ * Areas with altitude constraints are extruded between
+ * their specified top and bottom.
+ *
+ * Altitude exaggeration is applied so volumes line up
+ * with the visible aircraft altitude scale.
  */
 import {
   Viewer,
-  Entity,
   Cartesian3,
   Color,
   CustomDataSource,
   PolygonHierarchy,
 } from 'cesium';
 
-const COLOR_ACTIVE_FILL = new Color(0, 1, 0, 0.08);
+const COLOR_ACTIVE_FILL = new Color(0, 1, 0, 0.06);
 const COLOR_ACTIVE_OUTLINE = new Color(0, 1, 0, 0.6);
+
+// Kármán line — edge of space (100 km).
+const KARMAN_LINE_M = 100_000;
+
+// BlueSky uses 1e9 as "effective infinity" for top/bottom.
+const INFINITY_THRESHOLD = 1e8;
 
 interface ShapeInfo {
   name: string;
@@ -36,10 +45,19 @@ export class AreaManager {
   private source: CustomDataSource;
   private pollTimer: number | null = null;
   private lastJson = '';
+  private _altScale = 1.0;
 
   constructor(private viewer: Viewer) {
     this.source = new CustomDataSource('areas');
     viewer.dataSources.add(this.source);
+  }
+
+  /** Match aircraft altitude exaggeration. */
+  setAltScale(scale: number): void {
+    this._altScale = scale;
+    // Force redraw so volumes update.
+    this.lastJson = '';
+    this._fetch();
   }
 
   /** Start polling the backend for areas. */
@@ -51,7 +69,6 @@ export class AreaManager {
     );
   }
 
-  /** Stop polling. */
   stopPolling(): void {
     if (this.pollTimer !== null) {
       clearInterval(this.pollTimer);
@@ -59,12 +76,11 @@ export class AreaManager {
     }
   }
 
-  /** Force an immediate refresh. */
   refresh(): void {
+    this.lastJson = '';
     this._fetch();
   }
 
-  /** Clear all rendered areas and invalidate cache. */
   clear(): void {
     this.source.entities.removeAll();
     this.lastJson = '';
@@ -75,7 +91,6 @@ export class AreaManager {
       const res = await fetch('/api/areas');
       if (!res.ok) return;
       const text = await res.text();
-      // Skip re-render if nothing changed.
       if (text === this.lastJson) return;
       this.lastJson = text;
       const data: AreasResponse = JSON.parse(text);
@@ -88,7 +103,6 @@ export class AreaManager {
   private _render(data: AreasResponse): void {
     this.source.entities.removeAll();
 
-    // Only render the currently active deletion area.
     if (!data.active_area) return;
     const shape = data.shapes?.[data.active_area];
     if (!shape) return;
@@ -97,6 +111,11 @@ export class AreaManager {
       shape.type, shape.coordinates,
     );
     if (!coords || coords.length < 6) return;
+
+    // Resolve top/bottom, defaulting to surface/Kármán.
+    const { top, bottom } = this._resolveAltitudes(
+      shape.top, shape.bottom,
+    );
 
     const positions =
       Cartesian3.fromDegreesArray(coords);
@@ -108,8 +127,32 @@ export class AreaManager {
         outline: true,
         outlineColor: COLOR_ACTIVE_OUTLINE,
         outlineWidth: 2,
+        // Extrude into a 3D volume.
+        height: bottom * this._altScale,
+        extrudedHeight: top * this._altScale,
       },
     });
+  }
+
+  /**
+   * Resolve sim-side top/bottom to display altitudes.
+   *
+   * BlueSky defaults to ±1e9 m for "no limit". We replace
+   * those with surface (0) and Kármán line (100 km).
+   */
+  private _resolveAltitudes(
+    top: number,
+    bottom: number,
+  ): { top: number; bottom: number } {
+    const resolvedTop =
+      top > INFINITY_THRESHOLD ? KARMAN_LINE_M : top;
+    const resolvedBottom =
+      bottom < -INFINITY_THRESHOLD || bottom < 0
+        ? 0 : bottom;
+    return {
+      top: resolvedTop,
+      bottom: resolvedBottom,
+    };
   }
 
   /**
