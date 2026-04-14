@@ -77,8 +77,9 @@ function velocityEndpoint(
 const COLOR_CPA_LINE = Color.ORANGE.withAlpha(0.6);
 
 // Separation ring color.
-const COLOR_PZ = new Color(0, 1, 0, 0.12);       // green — no LoS
-const COLOR_PZ_CONFLICT = new Color(1, 0, 0, 0.28);  // red — in conflict / LoS
+const COLOR_PZ = new Color(0, 1, 0, 0.12);        // green — safe
+const COLOR_PZ_PREDICT = new Color(1, 0.6, 0, 0.20); // orange — conflict predicted
+const COLOR_PZ_LOS = new Color(1, 0, 0, 0.32);    // red — LoS
 
 export class AircraftManager {
   private entities = new Map<string, Entity>();
@@ -286,7 +287,10 @@ export class AircraftManager {
       const hpz = data.hpz?.[i] ?? 304.8;
       if (this._pzVisible && rpz > 0) {
         const pzColor = inlos
-          ? COLOR_PZ_CONFLICT : COLOR_PZ;
+          ? COLOR_PZ_LOS
+          : inconf
+            ? COLOR_PZ_PREDICT
+            : COLOR_PZ;
         const altScaled = alt * this._altScale;
         const hpzScaled = hpz * this._altScale;
         const bottomAlt = altScaled - hpzScaled;
