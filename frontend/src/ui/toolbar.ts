@@ -15,6 +15,18 @@ import * as api from '../services/api';
 
 type TabName = 'sim' | 'layers' | 'view' | 'areas';
 
+export interface ImageryChoice {
+  id: string;
+  label: string;
+  disabled: boolean;
+}
+
+export interface TerrainChoice {
+  id: string;
+  label: string;
+  disabled: boolean;
+}
+
 @customElement('bluesky-toolbar')
 export class BlueSkyToolbar extends LitElement {
   @state() simState = 'INIT';
@@ -33,6 +45,12 @@ export class BlueSkyToolbar extends LitElement {
   @state() is3D = true;
   @state() altScale = 10;
   @state() activeTab: TabName = 'sim';
+  @state() imageryOptions: ImageryChoice[] = [];
+  @state() terrainOptions: TerrainChoice[] = [];
+  @state() currentImagery = '';
+  @state() currentTerrain = 'flat';
+  @state() ionTokenSet = false;
+  @state() showTokenInput = false;
 
   static styles = css`
     :host {
@@ -179,6 +197,27 @@ export class BlueSkyToolbar extends LitElement {
         }),
       );
     }
+  }
+
+  /** Populate imagery/terrain options from the viewer. */
+  setImageryOptions(
+    options: ImageryChoice[],
+    current: string,
+  ): void {
+    this.imageryOptions = options;
+    this.currentImagery = current;
+  }
+
+  setTerrainOptions(
+    options: TerrainChoice[],
+    current: string,
+  ): void {
+    this.terrainOptions = options;
+    this.currentTerrain = current;
+  }
+
+  setIonTokenStatus(tokenSet: boolean): void {
+    this.ionTokenSet = tokenSet;
   }
 
   /** Fetch categorized scenario list. */
@@ -334,6 +373,42 @@ export class BlueSkyToolbar extends LitElement {
         />
         <span class="alt-val">${this.altScale}x</span>
       </div>
+      <div class="sep"></div>
+      <label>Imagery:</label>
+      <select
+        .value=${this.currentImagery}
+        @change=${this._onImageryChange}
+      >
+        ${this.imageryOptions.map(
+          (o) => html`
+            <option
+              value=${o.id}
+              ?disabled=${o.disabled}
+              ?selected=${this.currentImagery === o.id}
+            >${o.label}${o.disabled
+              ? ' (Ion required)' : ''}</option>
+          `,
+        )}
+      </select>
+      <label>Terrain:</label>
+      <select
+        .value=${this.currentTerrain}
+        @change=${this._onTerrainChange}
+      >
+        ${this.terrainOptions.map(
+          (o) => html`
+            <option
+              value=${o.id}
+              ?disabled=${o.disabled}
+              ?selected=${this.currentTerrain === o.id}
+            >${o.label}${o.disabled
+              ? ' (Ion required)' : ''}</option>
+          `,
+        )}
+      </select>
+      <button @click=${this._toggleTokenInput}>
+        ${this.ionTokenSet ? 'Ion \u2713' : 'Set Ion Token'}
+      </button>
     `;
   }
 
@@ -398,6 +473,53 @@ export class BlueSkyToolbar extends LitElement {
   private _toggleLeaders(): void {
     this.showLeaders = !this.showLeaders;
     this._dispatchLayer('leaders', this.showLeaders);
+  }
+
+  private _onImageryChange(e: Event): void {
+    const id = (e.target as HTMLSelectElement).value;
+    this.currentImagery = id;
+    this.dispatchEvent(
+      new CustomEvent('imagery-change', {
+        detail: { id },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  private _onTerrainChange(e: Event): void {
+    const id = (e.target as HTMLSelectElement).value;
+    this.currentTerrain = id;
+    this.dispatchEvent(
+      new CustomEvent('terrain-change', {
+        detail: { id },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
+
+  private _toggleTokenInput(): void {
+    const current = this.ionTokenSet
+      ? '(token is set)'
+      : '';
+    const val = prompt(
+      'Cesium Ion access token:\n\n'
+        + 'Get one free at https://ion.cesium.com/signup\n'
+        + 'Leave empty to clear.',
+      current,
+    );
+    if (val === null) return;  // cancelled
+    const cleaned = val === '(token is set)'
+      ? this.ionTokenSet ? '' : ''
+      : val.trim();
+    this.dispatchEvent(
+      new CustomEvent('ion-token-set', {
+        detail: { token: cleaned },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private _onAltScale(e: Event): void {

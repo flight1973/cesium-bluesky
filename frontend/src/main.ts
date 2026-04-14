@@ -12,7 +12,16 @@ import {
   Math as CesiumMath,
   defined,
 } from 'cesium';
-import { createViewer, applyIonConfig } from './cesium/viewer';
+import {
+  createViewer,
+  applyIonConfig,
+  setImagery,
+  setTerrain,
+  setIonToken,
+  isIonEnabled,
+  ALL_IMAGERY,
+  ALL_TERRAIN,
+} from './cesium/viewer';
 import { AircraftManager } from './cesium/entities/aircraft';
 import { TrailManager } from './cesium/entities/trails';
 import { RouteManager } from './cesium/entities/routes';
@@ -417,8 +426,65 @@ areaMgr.setAltScale(10);
 ws.connect();
 cmdConsole.focus();
 
+// ── Imagery / Terrain / Ion token wiring ────────────
+function refreshLayerOptions(): void {
+  const ionOk = isIonEnabled();
+  toolbar.setImageryOptions(
+    ALL_IMAGERY.map((o) => ({
+      id: o.id,
+      label: o.label,
+      disabled: o.needsIon && !ionOk,
+    })),
+    ionOk ? 'bing-aerial' : 'cartodb-dark',
+  );
+  toolbar.setTerrainOptions(
+    ALL_TERRAIN.map((o) => ({
+      id: o.id,
+      label: o.label,
+      disabled: o.needsIon && !ionOk,
+    })),
+    'flat',
+  );
+  toolbar.setIonTokenStatus(ionOk);
+}
+refreshLayerOptions();
+
+document.addEventListener(
+  'imagery-change',
+  ((e: CustomEvent) => {
+    const opt = ALL_IMAGERY.find(
+      (o) => o.id === e.detail.id,
+    );
+    if (!opt) return;
+    setImagery(viewer, opt).catch((err) => {
+      alert(`Failed to load imagery: ${err}`);
+    });
+  }) as EventListener,
+);
+
+document.addEventListener(
+  'terrain-change',
+  ((e: CustomEvent) => {
+    const opt = ALL_TERRAIN.find(
+      (o) => o.id === e.detail.id,
+    );
+    if (!opt) return;
+    setTerrain(viewer, opt).catch((err) => {
+      alert(`Failed to load terrain: ${err}`);
+    });
+  }) as EventListener,
+);
+
+document.addEventListener(
+  'ion-token-set',
+  ((e: CustomEvent) => {
+    setIonToken(e.detail.token);
+    refreshLayerOptions();
+  }) as EventListener,
+);
+
 // Check for Cesium Ion token and upgrade if available.
-applyIonConfig(viewer);
+applyIonConfig(viewer).then(() => refreshLayerOptions());
 
 // ── Backend state sync ──────────────────────────────
 // Poll /api/state every 2 seconds to keep toolbar
