@@ -297,19 +297,20 @@ document.addEventListener(
   }) as EventListener,
 );
 
-// ── Pilot view camera tracking ──────────────────────
-// Camera sits a few meters behind and above the
-// selected aircraft, looking forward along its heading.
-// Toggles off if clicked again or when aircraft leaves.
-let pilotViewAcid: string | null = null;
+// ── Aircraft follow camera (chase / cockpit) ────────
+// Chase:  camera behind and above the aircraft
+// Pilot:  camera at the cockpit looking forward
+type CamMode = 'chase' | 'pilot';
+let camTrackAcid: string | null = null;
+let camTrackMode: CamMode = 'chase';
 
-function updatePilotViewCamera(): void {
-  if (!pilotViewAcid) return;
+function updateTrackingCamera(): void {
+  if (!camTrackAcid) return;
   const state = aircraftMgr.getAircraftState(
-    pilotViewAcid,
+    camTrackAcid,
   );
   if (!state) {
-    pilotViewAcid = null;
+    camTrackAcid = null;
     return;
   }
 
@@ -317,22 +318,35 @@ function updatePilotViewCamera(): void {
   const altM = state.alt * scale;
   const headingRad = CesiumMath.toRadians(state.trk);
 
-  // Camera offset in ENU: 150m behind, 25m above.
-  const behind = 150;
-  const above = 25;
-  const east = -Math.sin(headingRad) * behind;
-  const north = -Math.cos(headingRad) * behind;
+  // Offset in local ENU depends on mode.
+  let east: number;
+  let north: number;
+  let up: number;
+  let pitchDeg: number;
 
-  // Transform offset to world coordinates via ENU frame.
+  if (camTrackMode === 'pilot') {
+    // First-person: at aircraft position, looking
+    // forward. Tiny forward offset so we're at the
+    // cockpit, not inside the model.
+    east = Math.sin(headingRad) * 3;
+    north = Math.cos(headingRad) * 3;
+    up = 2;   // roughly cockpit height above hull
+    pitchDeg = -2;  // slight downward
+  } else {
+    // Chase: 150m behind, 25m above.
+    east = -Math.sin(headingRad) * 150;
+    north = -Math.cos(headingRad) * 150;
+    up = 25;
+    pitchDeg = -5;
+  }
+
   const aircraftPos = Cartesian3.fromDegrees(
     state.lon, state.lat, altM,
   );
   const enu = Transforms.eastNorthUpToFixedFrame(
     aircraftPos,
   );
-  const localOffset = new Cartesian3(
-    east, north, above,
-  );
+  const localOffset = new Cartesian3(east, north, up);
   const camPos = new Cartesian3();
   Matrix4.multiplyByPoint(enu, localOffset, camPos);
 
@@ -340,31 +354,32 @@ function updatePilotViewCamera(): void {
     destination: camPos,
     orientation: new HeadingPitchRoll(
       headingRad,
-      CesiumMath.toRadians(-5),
+      CesiumMath.toRadians(pitchDeg),
       0,
     ),
   });
 }
 
-// Update pilot view every frame the viewer renders.
+// Update follow camera every render frame.
 viewer.scene.preRender.addEventListener(
-  updatePilotViewCamera,
+  updateTrackingCamera,
 );
 
 document.addEventListener(
-  'pilot-view',
+  'cam-view',
   ((e: CustomEvent) => {
     const acid = e.detail.acid;
-    if (pilotViewAcid === acid) {
-      // Toggle off
-      pilotViewAcid = null;
+    const mode: CamMode = e.detail.mode || 'chase';
+    if (camTrackAcid === acid && camTrackMode === mode) {
+      camTrackAcid = null;
       cmdConsole.echo(
-        `Pilot view: off (${acid})`,
+        `${mode} view: off (${acid})`,
       );
     } else {
-      pilotViewAcid = acid;
+      camTrackAcid = acid;
+      camTrackMode = mode;
       cmdConsole.echo(
-        `Pilot view: ${acid}`,
+        `${mode} view: ${acid}`,
       );
     }
   }) as EventListener,
