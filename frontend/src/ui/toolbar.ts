@@ -1,18 +1,28 @@
 /**
- * Simulation control toolbar with layer toggle buttons.
+ * Simulation toolbar with tabbed sections.
  *
- * Top bar: OP/HOLD | RESET | Speed selector
- * Layer toggles: TRAIL | ROUTE | LABEL
+ * Groups controls by purpose to reduce clutter:
+ *   SIM    — OP / HOLD / RESET / Scenario / Speed
+ *   LAYERS — TRAIL / ROUTE / LABEL / VEC / PZ / APT / WPT
+ *   VIEW   — 2D/3D toggle, Alt Exag slider
+ *
+ * Tabs run along the top of the toolbar; the active tab's
+ * controls are shown below.
  */
 import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import * as api from '../services/api';
 
+type TabName = 'sim' | 'layers' | 'view';
+
 @customElement('bluesky-toolbar')
 export class BlueSkyToolbar extends LitElement {
   @state() simState = 'INIT';
   @state() dtmult = 1.0;
-  @state() scenarioCategories: Record<string, { filename: string; name: string }[]> = {};
+  @state() scenarioCategories: Record<
+    string,
+    { filename: string; name: string }[]
+  > = {};
   @state() showTrails = false;
   @state() showRoutes = true;
   @state() showLabels = true;
@@ -22,18 +32,54 @@ export class BlueSkyToolbar extends LitElement {
   @state() showPz = false;
   @state() is3D = true;
   @state() altScale = 10;
+  @state() activeTab: TabName = 'sim';
 
   static styles = css`
     :host {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
+      display: block;
       background: rgba(0, 0, 0, 0.85);
       font-family: 'Consolas', 'Courier New', monospace;
       font-size: 13px;
       color: #00ff00;
+      border-radius: 4px;
+      overflow: hidden;
     }
+
+    /* Tab strip */
+    .tabs {
+      display: flex;
+      background: #0a0a0a;
+      border-bottom: 1px solid #222;
+    }
+    .tab {
+      padding: 3px 12px;
+      font-size: 10px;
+      color: #888;
+      cursor: pointer;
+      border-right: 1px solid #1a1a1a;
+      user-select: none;
+      letter-spacing: 0.5px;
+    }
+    .tab:hover {
+      color: #00ff00;
+      background: #111;
+    }
+    .tab.active {
+      color: #00ff00;
+      background: rgba(0, 0, 0, 0.85);
+      border-bottom: 1px solid #00ff00;
+      margin-bottom: -1px;
+    }
+
+    /* Control row */
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      min-height: 28px;
+    }
+
     button {
       background: #222;
       color: #00ff00;
@@ -65,6 +111,7 @@ export class BlueSkyToolbar extends LitElement {
       background: #444;
     }
     label { color: #888; font-size: 11px; }
+
     .alt-group {
       display: flex;
       align-items: center;
@@ -72,7 +119,7 @@ export class BlueSkyToolbar extends LitElement {
     }
     input[type=range] {
       -webkit-appearance: none;
-      width: 80px;
+      width: 120px;
       height: 4px;
       background: #444;
       border-radius: 2px;
@@ -95,15 +142,86 @@ export class BlueSkyToolbar extends LitElement {
   `;
 
   render() {
+    return html`
+      <div class="tabs">
+        ${this._tab('sim', 'SIM')}
+        ${this._tab('layers', 'LAYERS')}
+        ${this._tab('view', 'VIEW')}
+      </div>
+      <div class="controls">
+        ${this._renderActiveTab()}
+      </div>
+    `;
+  }
+
+  /** Called externally when SIMINFO arrives. */
+  updateState(stateName: string, dtmult: number): void {
+    this.simState = stateName;
+    this.dtmult = dtmult;
+  }
+
+  /** Sync button state with actual backend flags. */
+  syncBackendState(flags: {
+    trails: boolean;
+    area: boolean;
+  }): void {
+    if (this.showTrails !== flags.trails) {
+      this.showTrails = flags.trails;
+      this.dispatchEvent(
+        new CustomEvent('toggle-layer', {
+          detail: {
+            layer: 'trails-display',
+            visible: flags.trails,
+          },
+          bubbles: true,
+          composed: true,
+        }),
+      );
+    }
+  }
+
+  /** Fetch categorized scenario list. */
+  async loadScenarios(): Promise<void> {
+    try {
+      const res = await fetch('/api/scenarios');
+      if (res.ok) {
+        this.scenarioCategories = await res.json();
+      }
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  // ── Tab rendering ─────────────────────────────────
+
+  private _tab(id: TabName, label: string) {
+    return html`
+      <div
+        class="tab ${this.activeTab === id
+          ? 'active' : ''}"
+        @click=${() => { this.activeTab = id; }}
+      >${label}</div>
+    `;
+  }
+
+  private _renderActiveTab() {
+    switch (this.activeTab) {
+      case 'sim':    return this._renderSim();
+      case 'layers': return this._renderLayers();
+      case 'view':   return this._renderView();
+    }
+  }
+
+  private _renderSim() {
     const running = this.simState === 'OP';
+    const held = !running && this.simState !== 'INIT';
     return html`
       <button
         class=${running ? 'active' : ''}
         @click=${this._op}
       >OP</button>
       <button
-        class=${!running && this.simState !== 'INIT'
-          ? 'active' : ''}
+        class=${held ? 'active' : ''}
         @click=${this._hold}
       >HOLD</button>
       <button @click=${this._reset}>RESET</button>
@@ -138,7 +256,11 @@ export class BlueSkyToolbar extends LitElement {
           `,
         )}
       </select>
-      <div class="sep"></div>
+    `;
+  }
+
+  private _renderLayers() {
+    return html`
       <button
         class=${this.showTrails ? '' : 'off'}
         @click=${this._toggleTrails}
@@ -159,6 +281,7 @@ export class BlueSkyToolbar extends LitElement {
         class=${this.showPz ? '' : 'off'}
         @click=${this._togglePz}
       >PZ</button>
+      <div class="sep"></div>
       <button
         class=${this.showAirports ? '' : 'off'}
         @click=${this._toggleAirports}
@@ -167,10 +290,15 @@ export class BlueSkyToolbar extends LitElement {
         class=${this.showWaypoints ? '' : 'off'}
         @click=${this._toggleWaypoints}
       >WPT</button>
-      <div class="sep"></div>
+    `;
+  }
+
+  private _renderView() {
+    return html`
       <button @click=${this._toggleView}>
         ${this.is3D ? '2D' : '3D'}
       </button>
+      <div class="sep"></div>
       <div class="alt-group">
         <label>Alt Exag:</label>
         <input
@@ -184,45 +312,7 @@ export class BlueSkyToolbar extends LitElement {
     `;
   }
 
-  /** Called externally when SIMINFO arrives. */
-  updateState(stateName: string, dtmult: number): void {
-    this.simState = stateName;
-    this.dtmult = dtmult;
-  }
-
-  /** Sync button state with actual backend flags. */
-  syncBackendState(flags: {
-    trails: boolean;
-    area: boolean;
-  }): void {
-    // Only update if different, to avoid flicker.
-    if (this.showTrails !== flags.trails) {
-      this.showTrails = flags.trails;
-      // Notify listeners so trail manager updates.
-      this.dispatchEvent(
-        new CustomEvent('toggle-layer', {
-          detail: {
-            layer: 'trails-display',
-            visible: flags.trails,
-          },
-          bubbles: true,
-          composed: true,
-        }),
-      );
-    }
-  }
-
-  /** Fetch categorized scenario list from backend. */
-  async loadScenarios(): Promise<void> {
-    try {
-      const res = await fetch('/api/scenarios');
-      if (res.ok) {
-        this.scenarioCategories = await res.json();
-      }
-    } catch {
-      // Non-fatal — dropdown stays empty.
-    }
-  }
+  // ── Event handlers ────────────────────────────────
 
   private _onScenario(e: Event): void {
     const sel = e.target as HTMLSelectElement;
@@ -235,7 +325,6 @@ export class BlueSkyToolbar extends LitElement {
         composed: true,
       }),
     );
-    // Reset dropdown to placeholder.
     sel.selectedIndex = 0;
   }
 
@@ -249,7 +338,6 @@ export class BlueSkyToolbar extends LitElement {
 
   private async _reset(): Promise<void> {
     await api.simReset();
-    // Notify app to clear all client-side state.
     this.dispatchEvent(
       new CustomEvent('sim-reset', {
         bubbles: true,
@@ -266,48 +354,6 @@ export class BlueSkyToolbar extends LitElement {
     await api.simDtmult(val);
   }
 
-  private _toggleTrails(): void {
-    this.showTrails = !this.showTrails;
-    this.dispatchEvent(
-      new CustomEvent('toggle-layer', {
-        detail: {
-          layer: 'trails',
-          visible: this.showTrails,
-        },
-        bubbles: true,
-        composed: true,
-      }),
-    );
-  }
-
-  private _toggleRoutes(): void {
-    this.showRoutes = !this.showRoutes;
-    this.dispatchEvent(
-      new CustomEvent('toggle-layer', {
-        detail: {
-          layer: 'routes',
-          visible: this.showRoutes,
-        },
-        bubbles: true,
-        composed: true,
-      }),
-    );
-  }
-
-  private _toggleLabels(): void {
-    this.showLabels = !this.showLabels;
-    this.dispatchEvent(
-      new CustomEvent('toggle-layer', {
-        detail: {
-          layer: 'labels',
-          visible: this.showLabels,
-        },
-        bubbles: true,
-        composed: true,
-      }),
-    );
-  }
-
   private _toggleView(): void {
     this.is3D = !this.is3D;
     this.dispatchEvent(
@@ -321,30 +367,12 @@ export class BlueSkyToolbar extends LitElement {
 
   private _togglePz(): void {
     this.showPz = !this.showPz;
-    this.dispatchEvent(
-      new CustomEvent('toggle-layer', {
-        detail: {
-          layer: 'pz',
-          visible: this.showPz,
-        },
-        bubbles: true,
-        composed: true,
-      }),
-    );
+    this._dispatchLayer('pz', this.showPz);
   }
 
   private _toggleLeaders(): void {
     this.showLeaders = !this.showLeaders;
-    this.dispatchEvent(
-      new CustomEvent('toggle-layer', {
-        detail: {
-          layer: 'leaders',
-          visible: this.showLeaders,
-        },
-        bubbles: true,
-        composed: true,
-      }),
-    );
+    this._dispatchLayer('leaders', this.showLeaders);
   }
 
   private _onAltScale(e: Event): void {
@@ -361,28 +389,38 @@ export class BlueSkyToolbar extends LitElement {
     );
   }
 
+  private _toggleTrails(): void {
+    this.showTrails = !this.showTrails;
+    this._dispatchLayer('trails', this.showTrails);
+  }
+
+  private _toggleRoutes(): void {
+    this.showRoutes = !this.showRoutes;
+    this._dispatchLayer('routes', this.showRoutes);
+  }
+
+  private _toggleLabels(): void {
+    this.showLabels = !this.showLabels;
+    this._dispatchLayer('labels', this.showLabels);
+  }
+
   private _toggleAirports(): void {
     this.showAirports = !this.showAirports;
-    this.dispatchEvent(
-      new CustomEvent('toggle-layer', {
-        detail: {
-          layer: 'airports',
-          visible: this.showAirports,
-        },
-        bubbles: true,
-        composed: true,
-      }),
-    );
+    this._dispatchLayer('airports', this.showAirports);
   }
 
   private _toggleWaypoints(): void {
     this.showWaypoints = !this.showWaypoints;
+    this._dispatchLayer('waypoints', this.showWaypoints);
+  }
+
+  private _dispatchLayer(
+    layer: string,
+    visible: boolean,
+  ): void {
     this.dispatchEvent(
       new CustomEvent('toggle-layer', {
-        detail: {
-          layer: 'waypoints',
-          visible: this.showWaypoints,
-        },
+        detail: { layer, visible },
         bubbles: true,
         composed: true,
       }),
