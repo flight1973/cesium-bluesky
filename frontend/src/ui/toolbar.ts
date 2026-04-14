@@ -31,6 +31,7 @@ export interface TerrainChoice {
 export class BlueSkyToolbar extends LitElement {
   @state() simState = 'INIT';
   @state() dtmult = 1.0;
+  @state() currentScenario = '';
   @state() scenarioCategories: Record<
     string,
     { filename: string; name: string }[]
@@ -174,9 +175,14 @@ export class BlueSkyToolbar extends LitElement {
   }
 
   /** Called externally when SIMINFO arrives. */
-  updateState(stateName: string, dtmult: number): void {
+  updateState(
+    stateName: string,
+    dtmult: number,
+    scenname: string = '',
+  ): void {
     this.simState = stateName;
     this.dtmult = dtmult;
+    this.currentScenario = scenname;
   }
 
   /** Sync button state with actual backend flags. */
@@ -291,17 +297,23 @@ export class BlueSkyToolbar extends LitElement {
       <button @click=${this._reset}>RESET</button>
       <div class="sep"></div>
       <select @change=${this._onScenario}>
-        <option value="" selected disabled>
-          Scenario...
-        </option>
+        <option value=""
+          ?selected=${!this.currentScenario}
+          disabled
+        >${this.currentScenario
+          ? '\u2014 select scenario \u2014'
+          : 'Scenario...'}</option>
         ${Object.entries(this.scenarioCategories).map(
           ([cat, items]) => html`
             <optgroup label=${cat}>
               ${items.map(
                 (s) => html`
-                  <option value=${s.filename}>
-                    ${s.name}
-                  </option>
+                  <option
+                    value=${s.filename}
+                    ?selected=${
+                      s.name === this.currentScenario
+                    }
+                  >${s.name}</option>
                 `,
               )}
             </optgroup>
@@ -438,7 +450,8 @@ export class BlueSkyToolbar extends LitElement {
         composed: true,
       }),
     );
-    sel.selectedIndex = 0;
+    // Don't reset selectedIndex — the dropdown will
+    // sync to the loaded scenario via SIMINFO updates.
   }
 
   private async _op(): Promise<void> {

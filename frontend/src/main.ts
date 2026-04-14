@@ -121,7 +121,9 @@ ws.on('ACDATA', (data: AcData) => {
 // ── Wire SIMINFO → status bar + toolbar ─────────────
 ws.on('SIMINFO', (data: SimInfo) => {
   statusBar.updateFromSimInfo(data);
-  toolbar.updateState(data.state_name, data.dtmult);
+  toolbar.updateState(
+    data.state_name, data.dtmult, data.scenname,
+  );
 });
 
 // ── Wire TRAILS → trail manager ─────────────────────
