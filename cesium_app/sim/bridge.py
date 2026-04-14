@@ -282,6 +282,7 @@ class SimBridge:
             "cas": float(bs.traf.cas[idx]),
             "gs": float(bs.traf.gs[idx]),
             "trk": float(bs.traf.trk[idx]),
+            "hdg": float(bs.traf.hdg[idx]),
             "vs": float(bs.traf.vs[idx]),
             "orig": orig,
             "dest": dest,

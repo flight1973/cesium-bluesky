@@ -161,6 +161,7 @@ class StateCollector:
                 "cas": bs.traf.cas.tolist(),
                 "gs": bs.traf.gs.tolist(),
                 "trk": bs.traf.trk.tolist(),
+                "hdg": bs.traf.hdg.tolist(),
                 "vs": bs.traf.vs.tolist(),
                 "inconf": self._safe_tolist(
                     cd, "inconf"

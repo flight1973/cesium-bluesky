@@ -9,7 +9,8 @@ export interface AcData {
   tas: number[];   // m/s
   cas: number[];   // m/s
   gs: number[];    // m/s
-  trk: number[];   // degrees
+  trk: number[];   // degrees — ground track
+  hdg?: number[];  // degrees — aircraft heading
   vs: number[];    // m/s
   inconf: boolean[];
   inlos: boolean[];

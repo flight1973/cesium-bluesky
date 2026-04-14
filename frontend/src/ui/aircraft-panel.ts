@@ -37,6 +37,7 @@ interface AircraftDetail {
   cas: number;
   gs: number;
   trk: number;
+  hdg?: number;
   vs: number;
   orig: string;
   dest: string;
@@ -214,7 +215,7 @@ export class AircraftPanel extends LitElement {
 
       <div class="section">
         ${this._fieldRow(
-          'HDG', `${Math.round(d.trk)}\u00B0`,
+          'HDG', this._fmtHdgTrk(d.hdg, d.trk),
           'hdg-input', `${Math.round(d.sel_hdg)}`,
           (v) => this._send(`HDG ${d.acid} ${v}`),
         )}
@@ -430,6 +431,34 @@ export class AircraftPanel extends LitElement {
       clearInterval(this.refreshTimer);
       this.refreshTimer = null;
     }
+  }
+
+  /**
+   * Format heading and track with wind correction angle.
+   *
+   * If hdg ≈ trk, just show one value. Otherwise show
+   * both and the crab angle (wind correction):
+   *   "HDG 095° TRK 100° (WCA 5°R)"
+   */
+  private _fmtHdgTrk(
+    hdg: number | undefined,
+    trk: number,
+  ): string {
+    if (hdg === undefined) {
+      return `${Math.round(trk)}\u00B0 trk`;
+    }
+    const h = Math.round(hdg);
+    const t = Math.round(trk);
+    // Shortest-path diff normalized to [-180, +180].
+    const wca = ((t - h + 540) % 360) - 180;
+    if (Math.abs(wca) < 1) {
+      return `${h}\u00B0`;
+    }
+    const dir = wca > 0 ? 'R' : 'L';
+    return (
+      `H${h}\u00B0 / T${t}\u00B0 ` +
+      `(WCA ${Math.abs(wca)}\u00B0${dir})`
+    );
   }
 
   /** Format bank angle with direction arrow and limit. */
