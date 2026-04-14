@@ -225,8 +225,8 @@ function selectAircraft(
         viewer.flyTo(entity, {
           offset: new HeadingPitchRange(
             0,
-            CesiumMath.toRadians(-45),
-            200000,
+            CesiumMath.toRadians(-90),  // straight down
+            100000,
           ),
           duration: 1.0,
         });
