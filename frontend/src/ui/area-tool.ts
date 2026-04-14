@@ -170,8 +170,8 @@ export class AreaTool extends LitElement {
         @click=${this._toggleArea}
       >${this.areaActive
           ? 'AREA ON' : 'AREA OFF'}</button>
-      <button @click=${this._checkArea}>
-        CHECK
+      <button @click=${this._openAreasPanel}>
+        AREAS LIST
       </button>
     `;
   }
@@ -298,6 +298,15 @@ export class AreaTool extends LitElement {
   }
 
   // ── Area state ────────────────────────────────────
+
+  private _openAreasPanel(): void {
+    this.dispatchEvent(
+      new CustomEvent('open-areas-panel', {
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
 
   private _toggleArea(): void {
     if (this.areaActive) {

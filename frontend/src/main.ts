@@ -29,6 +29,7 @@ import './ui/console';
 import './ui/aircraft-panel';
 import './ui/fms-panel';
 import './ui/area-tool';
+import './ui/areas-panel';
 import './ui/camera-controls';
 
 import type { BlueSkyToolbar } from './ui/toolbar';
@@ -38,6 +39,7 @@ import type { BlueSkyConsole } from './ui/console';
 import type { AircraftPanel } from './ui/aircraft-panel';
 import type { FmsPanel } from './ui/fms-panel';
 import type { AreaTool } from './ui/area-tool';
+import type { AreasPanel } from './ui/areas-panel';
 import type { CameraControls } from './ui/camera-controls';
 
 // ── Initialize Cesium viewer ────────────────────────
@@ -75,6 +77,9 @@ const fmsPanel = document.querySelector(
 const areaTool = document.querySelector(
   'area-tool',
 ) as AreaTool;
+const areasPanel = document.querySelector(
+  'areas-panel',
+) as AreasPanel;
 const camCtrl = document.querySelector(
   'camera-controls',
 ) as CameraControls;
@@ -161,6 +166,7 @@ cmdConsole.setCommandHandler(sendCommand);
 acPanel.setCommandHandler(sendCommand);
 fmsPanel.setCommandHandler(sendCommand);
 areaTool.setCommandHandler(sendCommand);
+areasPanel.setCommandHandler(sendCommand);
 areaTool.setViewer(viewer);
 cmdConsole.loadCommandBriefs();
 cmdConsole.loadInitialLog();
@@ -245,6 +251,14 @@ document.addEventListener(
   'open-fms',
   ((e: CustomEvent) => {
     fmsPanel.open(e.detail.acid);
+  }) as EventListener,
+);
+
+// ── Areas panel open event ──────────────────────────
+document.addEventListener(
+  'open-areas-panel',
+  (() => {
+    areasPanel.open();
   }) as EventListener,
 );
 
