@@ -237,14 +237,14 @@ export class AircraftPanel extends LitElement {
         <div class="toggle-row">
           <button
             class="toggle-btn ${d.lnav ? 'on' : ''}"
-            @click=${() => this._send(
-              `LNAV ${d.acid} ${d.lnav ? 'OFF' : 'ON'}`,
+            @click=${() => this._toggleNav(
+              'LNAV', d.acid, d.lnav,
             )}
           >LNAV ${d.lnav ? 'ON' : 'OFF'}</button>
           <button
             class="toggle-btn ${d.vnav ? 'on' : ''}"
-            @click=${() => this._send(
-              `VNAV ${d.acid} ${d.vnav ? 'OFF' : 'ON'}`,
+            @click=${() => this._toggleNav(
+              'VNAV', d.acid, d.vnav,
             )}
           >VNAV ${d.vnav ? 'ON' : 'OFF'}</button>
           <button
@@ -305,7 +305,7 @@ export class AircraftPanel extends LitElement {
     // Auto-refresh every 2s while open.
     this._stopRefresh();
     this.refreshTimer = window.setInterval(
-      () => this._refresh(), 2000,
+      () => this._refresh(), 1000,
     );
   }
 
@@ -341,6 +341,35 @@ export class AircraftPanel extends LitElement {
     this.onCommand?.(cmd);
     // Refresh detail after command takes effect.
     setTimeout(() => this._refresh(), 500);
+  }
+
+  /**
+   * Toggle LNAV/VNAV with optimistic UI update.
+   *
+   * Flips the local flag immediately for instant feedback,
+   * sends the command, then verifies against backend state.
+   */
+  private _toggleNav(
+    which: 'LNAV' | 'VNAV',
+    acid: string,
+    current: boolean,
+  ): void {
+    if (!this.detail) return;
+    const next = !current;
+    const key = which.toLowerCase() as 'lnav' | 'vnav';
+
+    // Optimistic local update.
+    this.detail = {
+      ...this.detail,
+      [key]: next,
+    };
+
+    const cmd = `${which} ${acid} ${next ? 'ON' : 'OFF'}`;
+    this.onCommand?.(cmd);
+
+    // Verify against backend in 500ms and 1500ms.
+    setTimeout(() => this._refresh(), 500);
+    setTimeout(() => this._refresh(), 1500);
   }
 
   private async _refresh(): Promise<void> {
