@@ -272,11 +272,18 @@ export class AircraftManager {
         }
       }
 
-      // ── Separation ring (protected zone) ──────────
+      // ── Protected zone cylinder (3D) ──────────────
       const rpz = data.rpz?.[i] ?? 0;
+      // Default hpz = 1000 ft if not sent.
+      const hpz = data.hpz?.[i] ?? 304.8;
       if (this._pzVisible && rpz > 0) {
         const pzColor = inconf
           ? COLOR_PZ_CONFLICT : COLOR_PZ;
+        const altScaled = alt * this._altScale;
+        const hpzScaled = hpz * this._altScale;
+        const bottomAlt = altScaled - hpzScaled;
+        const topAlt = altScaled + hpzScaled;
+
         let pzEntity = this.pzEntities.get(acid);
         if (pzEntity) {
           pzEntity.show = true;
@@ -286,9 +293,13 @@ export class AircraftManager {
             new ConstantProperty(rpz);
           pzEntity.ellipse!.semiMinorAxis =
             new ConstantProperty(rpz);
+          pzEntity.ellipse!.height =
+            new ConstantProperty(bottomAlt);
+          pzEntity.ellipse!.extrudedHeight =
+            new ConstantProperty(topAlt);
           (pzEntity.ellipse!.material as any) = pzColor;
           (pzEntity.ellipse!.outlineColor as any) =
-            pzColor.withAlpha(0.6);
+            pzColor.withAlpha(0.7);
         } else {
           pzEntity = this.viewer.entities.add({
             id: `pz-${acid}`,
@@ -298,9 +309,10 @@ export class AircraftManager {
               semiMinorAxis: rpz,
               material: pzColor,
               outline: true,
-              outlineColor: pzColor.withAlpha(0.6),
+              outlineColor: pzColor.withAlpha(0.7),
               outlineWidth: 1,
-              height: alt * this._altScale,
+              height: bottomAlt,
+              extrudedHeight: topAlt,
             },
           });
           this.pzEntities.set(acid, pzEntity);

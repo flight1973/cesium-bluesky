@@ -126,6 +126,7 @@ class StateCollector:
                     cd, "tcpamax"
                 ),
                 "rpz": self._safe_tolist(cd, "rpz"),
+                "hpz": self._safe_tolist(cd, "hpz"),
                 "nconf_cur": len(cd.confpairs_unique),
                 "nconf_tot": len(cd.confpairs_all),
                 "nlos_cur": len(cd.lospairs_unique),

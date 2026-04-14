@@ -14,6 +14,7 @@ export interface AcData {
   inconf: boolean[];
   tcpamax?: number[];
   rpz?: number[];
+  hpz?: number[];
   nconf_cur: number;
   nconf_tot: number;
   nlos_cur: number;
