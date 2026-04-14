@@ -97,6 +97,13 @@
       z-index: 10;
     }
 
+    /* Scale bar overlay bottom-right of viewer */
+    scale-bar {
+      position: absolute;
+      bottom: 8px; right: 8px;
+      z-index: 10;
+    }
+
     /* Sidebar: traffic list */
     bluesky-traffic-list {
       grid-area: sidebar;
@@ -118,6 +125,7 @@
       <bluesky-toolbar></bluesky-toolbar>
       <area-tool hidden></area-tool>
       <camera-controls></camera-controls>
+      <scale-bar></scale-bar>
     </div>
     <bluesky-traffic-list></bluesky-traffic-list>
     <aircraft-panel hidden></aircraft-panel>

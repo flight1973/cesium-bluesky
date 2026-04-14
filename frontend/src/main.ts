@@ -40,6 +40,7 @@ import './ui/fms-panel';
 import './ui/area-tool';
 import './ui/areas-panel';
 import './ui/camera-controls';
+import './ui/scale-bar';
 
 import type { BlueSkyToolbar } from './ui/toolbar';
 import type { BlueSkyStatusBar } from './ui/status-bar';
@@ -50,6 +51,7 @@ import type { FmsPanel } from './ui/fms-panel';
 import type { AreaTool } from './ui/area-tool';
 import type { AreasPanel } from './ui/areas-panel';
 import type { CameraControls } from './ui/camera-controls';
+import type { ScaleBar } from './ui/scale-bar';
 
 // ── Initialize Cesium viewer ────────────────────────
 const viewer = createViewer('cesium-container');
@@ -93,6 +95,10 @@ const camCtrl = document.querySelector(
   'camera-controls',
 ) as CameraControls;
 camCtrl.setViewer(viewer);
+const scaleBar = document.querySelector(
+  'scale-bar',
+) as ScaleBar;
+scaleBar.setViewer(viewer);
 
 // ── Wire ACDATA → entities + traffic list ───────────
 ws.on('ACDATA', (data: AcData) => {
