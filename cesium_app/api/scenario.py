@@ -74,6 +74,23 @@ class ScenarioSave(BaseModel):
     overwrite: bool = True
 
 
+class ScenarioTextSave(BaseModel):
+    """Request body for saving a scenario as raw text.
+
+    Bypasses the structured entries format — use this to
+    preserve comments, blank lines, and original formatting.
+
+    Attributes:
+        filename: Target filename.
+        text: Full .scn file content.
+        overwrite: If false, fail when file exists.
+    """
+
+    filename: str
+    text: str
+    overwrite: bool = True
+
+
 def _user_scenario_dir() -> Path:
     """User-writable directory for saving scenarios.
 
@@ -280,6 +297,74 @@ async def get_scenario_content(
         "filename": filename,
         "entries": entries,
         "writable": writable,
+    }
+
+
+@router.get("/text")
+async def get_scenario_text(
+    request: Request,
+    filename: str,
+) -> dict:
+    """Return the raw text of a scenario file.
+
+    Preserves comments and blank lines.
+    """
+    path = _resolve_scenario_file(filename)
+    if path is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Scenario {filename} not found",
+        )
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Read failed: {exc}",
+        ) from exc
+
+    user_dir = _user_scenario_dir().resolve()
+    writable = str(path.resolve()).startswith(
+        str(user_dir),
+    )
+    return {
+        "filename": filename,
+        "text": text,
+        "writable": writable,
+    }
+
+
+@router.post("/save-text")
+async def save_scenario_text(
+    request: Request,
+    body: ScenarioTextSave,
+) -> dict:
+    """Save raw text as a scenario file.
+
+    Preserves comments and whitespace exactly as provided.
+    Use this when editing in text mode.
+    """
+    fname = _safe_filename(body.filename)
+    target = _user_scenario_dir() / fname
+    if target.exists() and not body.overwrite:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Scenario {fname} already exists",
+        )
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.write_text(body.text, encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Write failed: {exc}",
+        ) from exc
+    return {
+        "status": "ok",
+        "filename": str(
+            target.relative_to(_user_scenario_dir())
+        ),
+        "size": target.stat().st_size,
     }
 
 

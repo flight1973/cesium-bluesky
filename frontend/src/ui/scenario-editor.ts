@@ -1,5 +1,5 @@
 /**
- * Scenario editor — create and edit versioned .scn files.
+ * Scenario editor — text-mode editing of .scn files.
  *
  * Layout:
  *   ┌──────────────────────────────────────┐
@@ -7,24 +7,21 @@
  *   │ File: [my_scen.scn ▾] [NEW] [LOAD]   │
  *   │ Versions: [v1] [v2] [v3 (current)]   │
  *   ├──────────────────────────────────────┤
- *   │ Time      Command              [del] │
- *   │ 00:00:00  CRE KL204 B738 ...   [✕]  │
- *   │ 00:00:10  ADDWPT KL204 EHAM    [✕]  │
- *   │ 00:00:30  LNAV KL204 ON        [✕]  │
- *   │ ...                                   │
+ *   │  1 # Scenario: my flight              │
+ *   │  2 00:00:00>CRE KL204 B738 ...        │
+ *   │  3 00:00:10>ADDWPT KL204 EHAM         │
+ *   │  4 00:00:30>LNAV KL204 ON             │
+ *   │  ...                                  │
  *   ├──────────────────────────────────────┤
- *   │ [time] [command]            [+ ADD]  │
- *   ├──────────────────────────────────────┤
- *   │ [SAVE] [SAVE AS NEW VER] [LOAD SIM]  │
+ *   │ [SAVE] [SAVE AS NEW VERSION] [LOAD]  │
  *   └──────────────────────────────────────┘
+ *
+ * Edits the raw text of the file directly.  Preserves
+ * comments, blank lines, and formatting.  Syntax is
+ * simply: ``HH:MM:SS.hh>command`` per line.
  */
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state, query } from 'lit/decorators.js';
-
-interface Entry {
-  time: number;
-  command: string;
-}
 
 interface VersionInfo {
   filename: string;
@@ -36,13 +33,11 @@ interface VersionInfo {
 @customElement('scenario-editor')
 export class ScenarioEditor extends LitElement {
   @state() private currentFile = '';
-  @state() private entries: Entry[] = [];
+  @state() private text = '';
   @state() private writable = true;
   @state() private versions: VersionInfo[] = [];
   @state() private dirty = false;
-  @state() private newTime = '00:00:00';
-  @state() private newCmd = '';
-  @query('#new-cmd') private newCmdInput!: HTMLInputElement;
+  @query('#editor') private editor!: HTMLTextAreaElement;
 
   private onCommand:
     ((cmd: string) => void) | null = null;
@@ -57,7 +52,7 @@ export class ScenarioEditor extends LitElement {
       font-family: 'Consolas', 'Courier New', monospace;
       font-size: 12px;
       border-left: 1px solid #333;
-      width: 500px;
+      width: 600px;
       height: 100%;
       overflow: hidden;
     }
@@ -93,6 +88,16 @@ export class ScenarioEditor extends LitElement {
       align-items: center;
       gap: 6px;
     }
+    .file-row input {
+      flex: 1;
+      background: #222;
+      border: 1px solid #444;
+      color: #00ff00;
+      padding: 2px 6px;
+      font-family: inherit;
+      font-size: 12px;
+      border-radius: 2px;
+    }
     .versions {
       display: flex;
       flex-wrap: wrap;
@@ -118,62 +123,40 @@ export class ScenarioEditor extends LitElement {
       border-color: #00ff00;
     }
 
-    .entries {
+    .editor-wrap {
       flex: 1;
-      overflow-y: auto;
-      padding: 4px 0;
-    }
-    .entry-row {
       display: flex;
-      gap: 6px;
-      padding: 2px 8px;
-      align-items: center;
-      border-bottom: 1px solid #111;
-    }
-    .entry-row:hover { background: #111; }
-    .entry-time {
-      color: #888;
-      font-size: 11px;
-      min-width: 75px;
-      flex-shrink: 0;
-    }
-    .entry-cmd {
-      flex: 1;
-      color: #00ff00;
-      font-size: 11px;
       overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      background: #0a0a0a;
     }
-    .del-btn {
-      background: none;
-      border: none;
-      color: #ff4444;
-      cursor: pointer;
+    .line-gutter {
+      padding: 6px 6px;
+      color: #555;
       font-size: 11px;
-      font-family: inherit;
-      padding: 0 4px;
+      text-align: right;
+      user-select: none;
+      background: #111;
+      border-right: 1px solid #222;
+      overflow: hidden;
+      white-space: pre;
+      min-width: 38px;
     }
-    .del-btn:hover { color: #ff8888; }
-
-    .add-row {
-      display: flex;
-      gap: 4px;
-      padding: 6px 8px;
-      border-top: 1px solid #222;
-      flex-shrink: 0;
-    }
-    .add-row input {
-      background: #222;
-      border: 1px solid #444;
+    textarea {
+      flex: 1;
+      background: transparent;
       color: #00ff00;
-      padding: 2px 6px;
+      border: none;
+      outline: none;
+      resize: none;
+      padding: 6px 8px;
       font-family: inherit;
       font-size: 12px;
-      border-radius: 2px;
+      line-height: 1.4;
+      white-space: pre;
+      overflow: auto;
+      tab-size: 4;
     }
-    .add-row input.time { width: 80px; }
-    .add-row input.cmd { flex: 1; }
+    textarea:focus { outline: none; }
 
     .actions {
       display: flex;
@@ -182,7 +165,6 @@ export class ScenarioEditor extends LitElement {
       border-top: 1px solid #333;
       flex-shrink: 0;
     }
-
     button.cmd-btn {
       background: #222;
       color: #00ff00;
@@ -203,19 +185,8 @@ export class ScenarioEditor extends LitElement {
       cursor: not-allowed;
       background: #111;
     }
-    button.cmd-btn.danger {
-      color: #ff4444;
-      border-color: #ff4444;
-    }
-    button.cmd-btn.danger:hover {
-      background: #ff4444;
-      color: #000;
-    }
 
-    label {
-      color: #888;
-      font-size: 11px;
-    }
+    label { color: #888; font-size: 11px; }
     .dirty-marker {
       color: #ffa000;
       margin-left: 4px;
@@ -224,10 +195,17 @@ export class ScenarioEditor extends LitElement {
       color: #ffa000;
       font-size: 10px;
       font-style: italic;
+      padding: 4px 8px;
     }
   `;
 
   render() {
+    const lineCount = this.text.split('\n').length;
+    const gutter = Array.from(
+      { length: lineCount },
+      (_, i) => String(i + 1),
+    ).join('\n');
+
     return html`
       <div class="header">
         <span>
@@ -245,9 +223,6 @@ export class ScenarioEditor extends LitElement {
         <div class="file-row">
           <label>File:</label>
           <input
-            style="flex:1; background:#222; border:1px solid
-              #444; color:#00ff00; padding:2px 6px;
-              font-family:inherit; font-size:12px;"
             .value=${this.currentFile}
             placeholder="my_scenario.scn"
             @input=${(e: Event) => {
@@ -286,60 +261,23 @@ export class ScenarioEditor extends LitElement {
         ` : nothing}
       </div>
 
-      <div class="entries">
-        ${this.entries.length === 0
-          ? html`<div style="padding:12px; color:#666">
-              No entries. Add commands below.
-            </div>`
-          : this.entries.map(
-              (e, i) => html`
-                <div class="entry-row">
-                  <input
-                    class="entry-time"
-                    .value=${this._fmtTime(e.time)}
-                    @change=${(ev: Event) =>
-                      this._editTime(i, ev)}
-                  />
-                  <input
-                    class="entry-cmd"
-                    style="background:transparent;
-                      border:none; color:#00ff00;
-                      font-family:inherit; font-size:11px;"
-                    .value=${e.command}
-                    @change=${(ev: Event) =>
-                      this._editCmd(i, ev)}
-                  />
-                  <button class="del-btn"
-                    @click=${() => this._deleteEntry(i)}
-                  >\u2715</button>
-                </div>
-              `,
-            )}
-      </div>
-
-      <div class="add-row">
-        <input class="time"
-          .value=${this.newTime}
-          placeholder="HH:MM:SS"
+      <div class="editor-wrap">
+        <pre class="line-gutter">${gutter}</pre>
+        <textarea
+          id="editor"
+          .value=${this.text}
           @input=${(e: Event) => {
-            this.newTime =
-              (e.target as HTMLInputElement).value;
+            this.text =
+              (e.target as HTMLTextAreaElement).value;
+            this.dirty = true;
           }}
-        />
-        <input id="new-cmd" class="cmd"
-          .value=${this.newCmd}
-          placeholder="command (e.g. CRE ...)"
-          @input=${(e: Event) => {
-            this.newCmd =
-              (e.target as HTMLInputElement).value;
-          }}
-          @keydown=${(e: KeyboardEvent) => {
-            if (e.key === 'Enter') this._addEntry();
-          }}
-        />
-        <button class="cmd-btn" @click=${this._addEntry}>
-          + ADD
-        </button>
+          @keydown=${this._onKey}
+          spellcheck="false"
+          placeholder="# Scenario commands here
+00:00:00>CRE KL204 B738 52.3 4.76 180 FL350 280
+00:00:10>ADDWPT KL204 EHAM
+00:00:30>LNAV KL204 ON"
+        ></textarea>
       </div>
 
       <div class="actions">
@@ -382,12 +320,11 @@ export class ScenarioEditor extends LitElement {
     );
   }
 
-  /** Load a scenario by filename. */
   async loadFile(filename: string): Promise<void> {
     this.currentFile = filename;
     try {
       const res = await fetch(
-        `/api/scenarios/content?filename=${
+        `/api/scenarios/text?filename=${
           encodeURIComponent(filename)
         }`,
       );
@@ -396,7 +333,7 @@ export class ScenarioEditor extends LitElement {
         return;
       }
       const data = await res.json();
-      this.entries = data.entries || [];
+      this.text = data.text || '';
       this.writable = !!data.writable;
       this.dirty = false;
       await this._refreshVersions();
@@ -416,7 +353,7 @@ export class ScenarioEditor extends LitElement {
       'Discard unsaved changes?',
     )) return;
     this.currentFile = 'untitled.scn';
-    this.entries = [];
+    this.text = '# New scenario\n00:00:00>';
     this.writable = true;
     this.versions = [];
     this.dirty = false;
@@ -462,74 +399,32 @@ export class ScenarioEditor extends LitElement {
     }
   }
 
-  private _parseTime(s: string): number {
-    const m = s.match(
-      /^(\d+):(\d+):(\d+)(?:\.(\d+))?$/,
-    );
-    if (!m) return 0;
-    const [, h, mm, ss, frac] = m;
-    let t = (
-      parseInt(h) * 3600
-      + parseInt(mm) * 60
-      + parseInt(ss)
-    );
-    if (frac) t += parseFloat(`0.${frac}`);
-    return t;
-  }
-
-  private _fmtTime(t: number): string {
-    const h = Math.floor(t / 3600);
-    const m = Math.floor((t % 3600) / 60);
-    const s = t - h * 3600 - m * 60;
-    return `${String(h).padStart(2, '0')}:`
-      + `${String(m).padStart(2, '0')}:`
-      + `${s.toFixed(2).padStart(5, '0')}`;
-  }
-
-  private _editTime(i: number, e: Event): void {
-    const t = this._parseTime(
-      (e.target as HTMLInputElement).value,
-    );
-    this.entries = this.entries.map(
-      (entry, idx) => idx === i
-        ? { ...entry, time: t } : entry,
-    );
-    this.dirty = true;
-  }
-
-  private _editCmd(i: number, e: Event): void {
-    const cmd = (e.target as HTMLInputElement).value;
-    this.entries = this.entries.map(
-      (entry, idx) => idx === i
-        ? { ...entry, command: cmd } : entry,
-    );
-    this.dirty = true;
-  }
-
-  private _deleteEntry(i: number): void {
-    this.entries = this.entries.filter(
-      (_, idx) => idx !== i,
-    );
-    this.dirty = true;
-  }
-
-  private _addEntry(): void {
-    const cmd = this.newCmd.trim();
-    if (!cmd) return;
-    const t = this._parseTime(this.newTime);
-    this.entries = [
-      ...this.entries,
-      { time: t, command: cmd },
-    ].sort((a, b) => a.time - b.time);
-    this.newCmd = '';
-    this.dirty = true;
-    this.newCmdInput?.focus();
+  /** Handle Tab key to insert spaces instead of
+   *  switching focus. */
+  private _onKey(e: KeyboardEvent): void {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const el = e.target as HTMLTextAreaElement;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      const insert = '    ';
+      this.text =
+        this.text.substring(0, start)
+        + insert
+        + this.text.substring(end);
+      this.dirty = true;
+      // Restore cursor after the tab.
+      this.updateComplete.then(() => {
+        el.selectionStart =
+          el.selectionEnd = start + insert.length;
+      });
+    }
   }
 
   private async _save(): Promise<void> {
     try {
       const res = await fetch(
-        '/api/scenarios/save',
+        '/api/scenarios/save-text',
         {
           method: 'POST',
           headers: {
@@ -537,7 +432,7 @@ export class ScenarioEditor extends LitElement {
           },
           body: JSON.stringify({
             filename: this.currentFile,
-            entries: this.entries,
+            text: this.text,
             overwrite: true,
           }),
         },
@@ -556,17 +451,30 @@ export class ScenarioEditor extends LitElement {
   }
 
   private async _saveAsVersion(): Promise<void> {
+    // Figure out next version name, then save-text to it.
+    const stem = this.currentFile
+      .replace(/\.scn$/i, '')
+      .replace(/_v\d+$/i, '');
+    let nextV = 2;
+    for (const v of this.versions) {
+      const m = v.filename.match(/_v(\d+)\.scn$/i);
+      if (m) {
+        nextV = Math.max(nextV, parseInt(m[1]) + 1);
+      }
+    }
+    const newName = `${stem}_v${nextV}.scn`;
     try {
       const res = await fetch(
-        '/api/scenarios/versions',
+        '/api/scenarios/save-text',
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            filename: this.currentFile,
-            entries: this.entries,
+            filename: newName,
+            text: this.text,
+            overwrite: false,
           }),
         },
       );
