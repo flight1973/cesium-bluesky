@@ -39,6 +39,7 @@ import './ui/aircraft-panel';
 import './ui/fms-panel';
 import './ui/area-tool';
 import './ui/areas-panel';
+import './ui/scenario-editor';
 import './ui/camera-controls';
 import './ui/scale-bar';
 
@@ -50,6 +51,7 @@ import type { AircraftPanel } from './ui/aircraft-panel';
 import type { FmsPanel } from './ui/fms-panel';
 import type { AreaTool } from './ui/area-tool';
 import type { AreasPanel } from './ui/areas-panel';
+import type { ScenarioEditor } from './ui/scenario-editor';
 import type { CameraControls } from './ui/camera-controls';
 import type { ScaleBar } from './ui/scale-bar';
 
@@ -91,6 +93,9 @@ const areaTool = document.querySelector(
 const areasPanel = document.querySelector(
   'areas-panel',
 ) as AreasPanel;
+const scenarioEditor = document.querySelector(
+  'scenario-editor',
+) as ScenarioEditor;
 const camCtrl = document.querySelector(
   'camera-controls',
 ) as CameraControls;
@@ -182,6 +187,7 @@ acPanel.setCommandHandler(sendCommand);
 fmsPanel.setCommandHandler(sendCommand);
 areaTool.setCommandHandler(sendCommand);
 areasPanel.setCommandHandler(sendCommand);
+scenarioEditor.setCommandHandler(sendCommand);
 areaTool.setViewer(viewer);
 cmdConsole.loadCommandBriefs();
 cmdConsole.loadInitialLog();
@@ -274,6 +280,14 @@ document.addEventListener(
   'open-areas-panel',
   (() => {
     areasPanel.open();
+  }) as EventListener,
+);
+
+// ── Scenario editor open event ──────────────────────
+document.addEventListener(
+  'open-scenario-editor',
+  (() => {
+    scenarioEditor.open();
   }) as EventListener,
 );
 

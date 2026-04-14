@@ -320,7 +320,20 @@ export class BlueSkyToolbar extends LitElement {
           `,
         )}
       </select>
+      <div class="sep"></div>
+      <button @click=${this._openScenarioEditor}>
+        EDIT SCENARIO
+      </button>
     `;
+  }
+
+  private _openScenarioEditor(): void {
+    this.dispatchEvent(
+      new CustomEvent('open-scenario-editor', {
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private _renderLayers() {
