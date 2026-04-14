@@ -76,8 +76,8 @@ function velocityEndpoint(
 const COLOR_CPA_LINE = Color.ORANGE.withAlpha(0.6);
 
 // Separation ring color.
-const COLOR_PZ = new Color(0, 1, 0, 0.22);       // green — no LoS
-const COLOR_PZ_CONFLICT = new Color(1, 0, 0, 0.45);  // red — in conflict / LoS
+const COLOR_PZ = new Color(0, 1, 0, 0.12);       // green — no LoS
+const COLOR_PZ_CONFLICT = new Color(1, 0, 0, 0.28);  // red — in conflict / LoS
 
 export class AircraftManager {
   private entities = new Map<string, Entity>();
@@ -203,6 +203,8 @@ export class AircraftManager {
             color,
             outlineColor: Color.BLACK,
             outlineWidth: 1,
+            // Render on top of other geometry (PZ, etc.).
+            disableDepthTestDistance: Infinity,
           },
           label: {
             text: labelText,
@@ -216,6 +218,8 @@ export class AircraftManager {
             showBackground: true,
             backgroundColor: new Color(0, 0, 0, 0.2),
             show: this._labelsVisible,
+            // Always render on top — never occluded by PZ.
+            disableDepthTestDistance: Infinity,
           },
         });
         this.entities.set(acid, entity);
