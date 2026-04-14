@@ -12,6 +12,7 @@ export interface AcData {
   trk: number[];   // degrees
   vs: number[];    // m/s
   inconf: boolean[];
+  inlos: boolean[];
   tcpamax?: number[];
   rpz?: number[];
   hpz?: number[];

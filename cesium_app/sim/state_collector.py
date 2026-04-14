@@ -102,12 +102,23 @@ class StateCollector:
                 "id": [], "lat": [], "lon": [],
                 "alt": [], "tas": [], "cas": [],
                 "gs": [], "trk": [], "vs": [],
-                "inconf": [],
+                "inconf": [], "inlos": [],
                 "nconf_cur": 0, "nconf_tot": 0,
                 "nlos_cur": 0, "nlos_tot": 0,
             }
         else:
             cd = bs.traf.cd
+            # Build inlos[i]: true if aircraft i is in any
+            # loss-of-separation pair this timestep.
+            los_ids: set = set()
+            for pair in getattr(cd, 'lospairs', []) or []:
+                if isinstance(pair, tuple) and len(pair) >= 2:
+                    los_ids.add(pair[0])
+                    los_ids.add(pair[1])
+            inlos = [
+                ac in los_ids for ac in bs.traf.id
+            ]
+
             snapshot = {
                 "simt": bs.sim.simt,
                 "id": list(bs.traf.id),
@@ -122,6 +133,7 @@ class StateCollector:
                 "inconf": self._safe_tolist(
                     cd, "inconf"
                 ),
+                "inlos": inlos,
                 "tcpamax": self._safe_tolist(
                     cd, "tcpamax"
                 ),

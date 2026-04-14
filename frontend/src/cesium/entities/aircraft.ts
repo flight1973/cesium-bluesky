@@ -33,7 +33,8 @@ import { FT, KTS } from '../../types';
 
 // ── Colors (matching BlueSky palette) ───────────────
 const COLOR_NORMAL = Color.LIME;
-const COLOR_CONFLICT = Color.ORANGE;
+const COLOR_CONFLICT = Color.ORANGE;  // predicted conflict
+const COLOR_LOS = Color.RED;  // active loss of separation
 const COLOR_SELECTED = Color.CYAN;
 
 // Point size in pixels.
@@ -129,6 +130,7 @@ export class AircraftManager {
       const cas = data.cas[i];
       const vs = data.vs[i];
       const inconf = data.inconf?.[i] ?? false;
+      const inlos = data.inlos?.[i] ?? false;
 
       // ── Line 2: Altitude + climb/descend arrow ───
       const altFt = alt / FT;
@@ -172,8 +174,10 @@ export class AircraftManager {
       let color: Color;
       if (isSelected) {
         color = COLOR_SELECTED;
+      } else if (inlos) {
+        color = COLOR_LOS;       // red = actual LoS
       } else if (inconf) {
-        color = COLOR_CONFLICT;
+        color = COLOR_CONFLICT;  // orange = predicted
       } else {
         color = COLOR_NORMAL;
       }
@@ -281,7 +285,7 @@ export class AircraftManager {
       // Default hpz = 1000 ft if not sent.
       const hpz = data.hpz?.[i] ?? 304.8;
       if (this._pzVisible && rpz > 0) {
-        const pzColor = inconf
+        const pzColor = inlos
           ? COLOR_PZ_CONFLICT : COLOR_PZ;
         const altScaled = alt * this._altScale;
         const hpzScaled = hpz * this._altScale;
