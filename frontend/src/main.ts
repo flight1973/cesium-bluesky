@@ -365,6 +365,14 @@ document.addEventListener(
   }) as EventListener,
 );
 
+// ── Toolbar tab → show/hide area tool ───────────────
+document.addEventListener(
+  'tab-changed',
+  ((e: CustomEvent) => {
+    areaTool.hidden = e.detail.tab !== 'areas';
+  }) as EventListener,
+);
+
 // ── Scenario loader ─────────────────────────────────
 toolbar.loadScenarios();
 document.addEventListener(

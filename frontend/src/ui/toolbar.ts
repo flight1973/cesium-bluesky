@@ -13,7 +13,7 @@ import { LitElement, html, css } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import * as api from '../services/api';
 
-type TabName = 'sim' | 'layers' | 'view';
+type TabName = 'sim' | 'layers' | 'view' | 'areas';
 
 @customElement('bluesky-toolbar')
 export class BlueSkyToolbar extends LitElement {
@@ -147,6 +147,7 @@ export class BlueSkyToolbar extends LitElement {
         ${this._tab('sim', 'SIM')}
         ${this._tab('layers', 'LAYERS')}
         ${this._tab('view', 'VIEW')}
+        ${this._tab('areas', 'AREAS')}
       </div>
       <div class="controls">
         ${this._renderActiveTab()}
@@ -199,9 +200,20 @@ export class BlueSkyToolbar extends LitElement {
       <div
         class="tab ${this.activeTab === id
           ? 'active' : ''}"
-        @click=${() => { this.activeTab = id; }}
+        @click=${() => this._setTab(id)}
       >${label}</div>
     `;
+  }
+
+  private _setTab(id: TabName): void {
+    this.activeTab = id;
+    this.dispatchEvent(
+      new CustomEvent('tab-changed', {
+        detail: { tab: id },
+        bubbles: true,
+        composed: true,
+      }),
+    );
   }
 
   private _renderActiveTab() {
@@ -209,7 +221,20 @@ export class BlueSkyToolbar extends LitElement {
       case 'sim':    return this._renderSim();
       case 'layers': return this._renderLayers();
       case 'view':   return this._renderView();
+      case 'areas':  return this._renderAreasHint();
     }
+  }
+
+  private _renderAreasHint() {
+    // The actual area-tool component lives outside the
+    // toolbar (so it can draw on the viewer).  When this
+    // tab is active, main.ts shows the area-tool bar.
+    return html`
+      <label style="color:#888; font-size:11px;">
+        Use the area tool bar below to draw and manage
+        deletion areas.
+      </label>
+    `;
   }
 
   private _renderSim() {
