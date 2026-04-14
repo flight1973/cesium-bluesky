@@ -186,11 +186,11 @@ export function createViewer(
 
   viewer.camera.setView({
     destination: Cartesian3.fromDegrees(
-      4.76, 50.5, 400000,
+      4.76, 52.3, 500000,
     ),
     orientation: {
       heading: CesiumMath.toRadians(0),
-      pitch: CesiumMath.toRadians(-45),
+      pitch: CesiumMath.toRadians(-90),
       roll: 0,
     },
   });
