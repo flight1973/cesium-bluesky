@@ -89,6 +89,8 @@ def resolve_all(
         gs = (ac.get('gs_kt', 0) or 0)
         trk = (ac.get('trk_deg', 0) or 0)
 
+        while dhdg > 180: dhdg -= 360
+        while dhdg < -180: dhdg += 360
         new_hdg = (trk + dhdg + 360) % 360
         new_spd = max(30, min(gs * 1.3, gs + dspd))
         new_vs = (ac.get('vs_fpm', 0) or 0) + dvs
