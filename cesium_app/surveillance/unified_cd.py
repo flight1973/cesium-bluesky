@@ -32,6 +32,7 @@ from cesium_app.surveillance.conflict_detect import (
     detect_conflicts as standalone_detect,
 )
 from cesium_app.surveillance import resolution as reso_registry
+from cesium_app.surveillance.right_of_way import apply_row
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,8 @@ def detect(
     if m == 'standalone':
         result = standalone_detect(items)
         result['source'] = 'standalone'
-        result['advisories'] = reso_registry.resolve(items, result)
+        raw_advs = reso_registry.resolve(items, result)
+        result['advisories'] = apply_row(items, result, raw_advs)
         result['reso_method'] = reso_registry.get_method()
         return result
 
