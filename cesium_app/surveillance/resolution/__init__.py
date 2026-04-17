@@ -105,5 +105,23 @@ def _autoregister():
     except ImportError:
         pass
 
+    try:
+        from cesium_app.surveillance.resolution.apf import resolve_all as apf
+        register('apf', apf)
+    except ImportError:
+        pass
+
+    try:
+        from cesium_app.surveillance.resolution.boids import resolve_all as boids
+        register('boids', boids)
+    except ImportError:
+        pass
+
+    try:
+        from cesium_app.surveillance.resolution.social_force import resolve_all as sf
+        register('social_force', sf)
+    except ImportError:
+        pass
+
 
 _autoregister()
