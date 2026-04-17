@@ -1,0 +1,47 @@
+# Build context exclusions — keep the Docker image lean.
+
+# Git
+.git
+.gitignore
+
+# Node modules (rebuilt in the container)
+frontend/node_modules
+frontend/dist
+
+# Python caches
+__pycache__
+*.pyc
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+
+# Data files (mounted as a volume, not baked in)
+data/airspace.db
+data/airspace.db-shm
+data/airspace.db-wal
+data/cifp/FAACIFP18_*
+data/ddr2/*.csv
+data/ddr2/*.txt
+data/helo_charts/
+data/proj_grids/
+
+# IDE / editor
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Claude / dev tooling
+.claude
+/private
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.yml
+Dockerfile
+.dockerignore

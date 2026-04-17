@@ -1,0 +1,70 @@
+# Cesium-BlueSky full stack
+#
+# Start:     docker compose up -d
+# First run: docker compose run app python -m cesium_app.ingest all
+# Status:    docker compose ps
+# Logs:      docker compose logs -f app
+# Stop:      docker compose down
+
+services:
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persistent data: SQLite cache, CIFP downloads,
+      # DDR2 files, chart tiles, EGM2008 geoid.
+      - app-data:/app/data
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    environment:
+      # Neo4j connection — matches the neo4j service below.
+      CESIUM_NEO4J_URI: bolt://neo4j:7687
+      CESIUM_NEO4J_USER: neo4j
+      CESIUM_NEO4J_PASS: ${NEO4J_PASSWORD:-bluesky-neo4j}
+      # Credential vault master key.  Generate one with:
+      #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      # Then set in .env or export before `docker compose up`.
+      CESIUM_VAULT_KEY: ${CESIUM_VAULT_KEY:-}
+      # Optional: Cesium Ion token for premium imagery.
+      CESIUM_ION_TOKEN: ${CESIUM_ION_TOKEN:-}
+    restart: unless-stopped
+
+  neo4j:
+    image: neo4j:5
+    ports:
+      - "7474:7474"   # Browser UI
+      - "7687:7687"   # Bolt protocol
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:-bluesky-neo4j}
+      NEO4J_PLUGINS: '["apoc","graph-data-science"]'
+      # Quiet noisy startup logs
+      NEO4J_dbms_security_procedures_unrestricted: apoc.*,gds.*
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j",
+             "-p", "${NEO4J_PASSWORD:-bluesky-neo4j}",
+             "RETURN 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    restart: unless-stopped
+
+  # GDAL sidecar — only runs on-demand for chart tiling.
+  # Usage: docker compose run gdal /work/raw /work/tiles/helicopter 8-14
+  gdal:
+    image: ghcr.io/osgeo/gdal:alpine-small-3.9.3
+    profiles: [tools]
+    volumes:
+      - app-data:/work
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["echo 'Usage: docker compose run gdal <script>'"]
+
+volumes:
+  app-data:
+    driver: local
+  neo4j-data:
+    driver: local
