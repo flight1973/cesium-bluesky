@@ -86,6 +86,31 @@ interface DrState {
   source: string;
 }
 
+/** Catmull-Rom spline evaluation at parameter t in [0,1]
+ *  through 4 control values (p0, p1, p2, p3).
+ *  Returns interpolated value between p1 and p2. */
+function catmullRom(
+  p0: number, p1: number, p2: number, p3: number, t: number,
+): number {
+  const t2 = t * t;
+  const t3 = t2 * t;
+  return 0.5 * (
+    (2 * p1) +
+    (-p0 + p2) * t +
+    (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 +
+    (-p0 + 3 * p1 - 3 * p2 + p3) * t3
+  );
+}
+
+/** Trajectory point: [dt, lat, lon, alt_m, gs_kt, trk_deg, vs_fpm] */
+type TrajPoint = [number, number, number, number, number, number, number];
+
+interface TrajState {
+  points: TrajPoint[];
+  fetchedAt: number;
+  speed: number;
+}
+
 const _scratchLocal = new Cartesian3();
 const _scratchWorld = new Cartesian3();
 
@@ -125,9 +150,12 @@ export class ObservedTrafficManager {
   private _dr = new Map<string, DrState>();
   private _drTimer: number | null = null;
 
-  constructor(private viewer: Viewer) {
-    this.source = new CustomDataSource('observed');
-    this.trailSource = new CustomDataSource('observed-trails');
+  private _prefix: string;
+
+  constructor(private viewer: Viewer, prefix = 'live') {
+    this._prefix = prefix;
+    this.source = new CustomDataSource(`observed-${prefix}`);
+    this.trailSource = new CustomDataSource(`observed-${prefix}-trails`);
     viewer.dataSources.add(this.source);
     viewer.dataSources.add(this.trailSource);
     this.source.show = this._visible;
@@ -149,17 +177,37 @@ export class ObservedTrafficManager {
     }
   }
 
+  private _lerpMode = false;
+  private _lerpInterval = 500;
+  private _lerpSpeed = 1;
+  private _traj = new Map<string, TrajState>();
+
   setInterpolation(on: boolean): void {
     this._interpolation = on;
+  }
+
+  setLerpMode(on: boolean, intervalMs = 500): void {
+    this._lerpMode = on;
+    this._lerpInterval = intervalMs;
+    if (on) this._interpolation = true;
+  }
+
+  setLerpSpeed(speed: number): void {
+    this._lerpSpeed = speed;
   }
 
   get interpolation(): boolean { return this._interpolation; }
 
   /** Advance every tracked aircraft by dead-reckoning
-   *  and update its Cesium entity position. */
+   *  or lerp interpolation. */
   private _drTick(): void {
     if (!this._visible) return;
     if (!this._interpolation) return;
+
+    if (this._lerpMode) {
+      this._lerpTick();
+      return;
+    }
     const now = Date.now();
     for (const [icao, dr] of this._dr) {
       const elapsed = (now - dr.observedAt) / 1000.0;
@@ -232,7 +280,7 @@ export class ObservedTrafficManager {
         const vs = dr.vs_ms + dr.vs_accel_ms2 * elapsed;
         const altFt = (dr.alt_m + dAlt) * 3.28084;
         const spdKt = gs / 0.514444;
-        const callsign = ent.name?.replace('live-', '') || icao;
+        const callsign = ent.name?.replace(/^(live|replay)-/, '') || icao;
         let altLabel: string;
         if (altFt >= TRANS_LVL_FT) {
           altLabel = `FL${Math.round(altFt / 100)}`;
@@ -263,6 +311,82 @@ export class ObservedTrafficManager {
       if (pz) {
         (pz.position as ConstantPositionProperty)
           .setValue(position);
+      }
+    }
+  }
+
+  private _lerpTick(): void {
+    const now = Date.now();
+    for (const [icao, traj] of this._traj) {
+      const pts = traj.points;
+      if (pts.length < 2) continue;
+
+      const realElapsed = (now - traj.fetchedAt) / 1000.0;
+      const simDt = pts[0][0] + realElapsed * traj.speed;
+
+      let i = 0;
+      while (i < pts.length - 1 && pts[i + 1][0] <= simDt) i++;
+      if (i >= pts.length - 1) continue;
+
+      const segStart = pts[i][0];
+      const segEnd = pts[i + 1][0];
+      const segLen = segEnd - segStart;
+      if (segLen <= 0) continue;
+      const t = Math.max(0, Math.min(1,
+        (simDt - segStart) / segLen));
+
+      const i0 = Math.max(0, i - 1);
+      const i1 = i;
+      const i2 = Math.min(pts.length - 1, i + 1);
+      const i3 = Math.min(pts.length - 1, i + 2);
+
+      const lat = catmullRom(pts[i0][1], pts[i1][1], pts[i2][1], pts[i3][1], t);
+      const lon = catmullRom(pts[i0][2], pts[i1][2], pts[i2][2], pts[i3][2], t);
+      const alt = catmullRom(pts[i0][3], pts[i1][3], pts[i2][3], pts[i3][3], t);
+      const gs = catmullRom(pts[i0][4], pts[i1][4], pts[i2][4], pts[i3][4], t);
+      const vs = catmullRom(pts[i0][6], pts[i1][6], pts[i2][6], pts[i3][6], t);
+
+      // Derive heading from spline tangent (avoids 0/360 wraparound issues).
+      const dt = 0.01;
+      const t2 = Math.min(1, t + dt);
+      const latAhead = catmullRom(pts[i0][1], pts[i1][1], pts[i2][1], pts[i3][1], t2);
+      const lonAhead = catmullRom(pts[i0][2], pts[i1][2], pts[i2][2], pts[i3][2], t2);
+      const dLat = latAhead - lat;
+      const dLon = lonAhead - lon;
+      const trk = (dLat === 0 && dLon === 0)
+        ? (pts[i1][5] * Math.PI / 180)
+        : Math.atan2(dLon * Math.cos(lat * Math.PI / 180), dLat);
+
+      const altScaled = alt * this._altScale;
+      const position = Cartesian3.fromDegrees(lon, lat, altScaled);
+
+      const ent = this._entities.get(icao);
+      if (ent) {
+        (ent.position as ConstantPositionProperty).setValue(position);
+        const altFt = alt * 3.28084;
+        const callsign = ent.name?.replace(/^(live|replay)-/, '') || icao;
+        let altLabel: string;
+        if (altFt >= TRANS_LVL_FT) {
+          altLabel = `FL${Math.round(altFt / 100)}`;
+        } else {
+          altLabel = `${Math.round(altFt)}ft`;
+        }
+        const vsArr = vs > 50 ? ' \u2191' : vs < -50 ? ' \u2193' : '';
+        ent.label!.text = new ConstantProperty(
+          `${callsign}\n${altLabel}${vsArr}\n${Math.round(gs)}\n(REPLAY)`,
+        );
+      }
+
+      const leader = this._leaders.get(icao);
+      if (leader) {
+        const gsMs = gs * 0.514444;
+        const vvEnd = velocityEndpoint(position, trk, gsMs * VV_SECONDS);
+        leader.polyline!.positions = new ConstantProperty([position, vvEnd]);
+      }
+
+      const pz = this._pzEntities.get(icao);
+      if (pz) {
+        (pz.position as ConstantPositionProperty).setValue(position);
       }
     }
   }
@@ -302,12 +426,20 @@ export class ObservedTrafficManager {
     for (const ac of this._last) this._render(ac);
   }
 
-  update(items: ObservedAircraft[]): void {
+  update(items: (ObservedAircraft & { trajectory?: TrajPoint[] })[]): void {
     this._last = items;
     const now = Date.now();
     const seen = new Set<string>();
     for (const ac of items) {
       seen.add(ac.icao24);
+
+      if (this._lerpMode && ac.trajectory && ac.trajectory.length >= 2) {
+        this._traj.set(ac.icao24, {
+          points: ac.trajectory,
+          fetchedAt: now,
+          speed: this._lerpSpeed,
+        });
+      }
 
       // Compute blend correction: where DR thinks the
       // aircraft is right now vs where the new
@@ -503,7 +635,7 @@ export class ObservedTrafficManager {
   private _recolorPz(): void {
     for (const [icao, pzEnt] of this._pzEntities) {
       const callsign = this._entities.get(icao)?.name
-        ?.replace('live-', '') || icao;
+        ?.replace(/^(live|replay)-/, '') || icao;
       let color: Color;
       if (this._losSet.has(callsign) || this._losSet.has(icao)) {
         color = Color.RED.withAlpha(0.6);
@@ -529,7 +661,7 @@ export class ObservedTrafficManager {
     const position = Cartesian3.fromDegrees(
       ac.lon, ac.lat, altM,
     );
-    const key = `live-${ac.icao24}`;
+    const key = `${this._prefix}-${ac.icao24}`;
 
     // ── Build label text ─────────────────────────────
     // Line 1: callsign + type (e.g., "AAL3192 B738")

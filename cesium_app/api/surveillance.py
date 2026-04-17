@@ -109,7 +109,8 @@ async def replay_traffic(
             404, f"Session '{label}' not found",
         )
     items = await asyncio.to_thread(
-        replay.get_snapshot, label, t, tolerance,
+        replay.get_snapshot_with_trajectory,
+        label, t, tolerance,
     )
     return await _enrich_and_detect(items)
 

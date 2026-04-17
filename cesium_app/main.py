@@ -27,6 +27,7 @@ from cesium_app.api import commands
 from cesium_app.api import docs as docs_api
 from cesium_app.api import navdata
 from cesium_app.api import pan as pan_api
+from cesium_app.api import performance as perf_api
 from cesium_app.api import procedures as procedures_api
 from cesium_app.api import routes as routes_api
 from cesium_app.api import scenario
@@ -123,6 +124,7 @@ app.include_router(routes_api.router)
 app.include_router(surv_api.router)
 app.include_router(pan_api.router)
 app.include_router(docs_api.router)
+app.include_router(perf_api.router)
 app.include_router(ws_streams.router)
 
 

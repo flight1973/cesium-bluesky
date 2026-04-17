@@ -65,6 +65,7 @@ import './ui/camera-controls';
 import './ui/scale-bar';
 import './ui/compass-ring';
 import './ui/layer-panel';
+import './ui/measure-tool';
 import './ui/settings-panel';
 import './ui/weather-time-strip';
 import './ui/replay-panel';
@@ -94,6 +95,7 @@ import type { ScaleBar } from './ui/scale-bar';
 import type { WeatherTimeStrip } from './ui/weather-time-strip';
 import type { CompassRing } from './ui/compass-ring';
 import type { LayerPanel } from './ui/layer-panel';
+import type { MeasureTool } from './ui/measure-tool';
 
 // ── Initialize Cesium viewer ────────────────────────
 const viewer = createViewer('cesium-container');
@@ -112,7 +114,9 @@ const wxImageryMgr = new WeatherImageryManager(viewer);
 const airspaceMgr = new AirspaceManager(viewer);
 const procedureMgr = new ProcedureManager(viewer);
 const pirepMgr = new PirepManager(viewer);
-const observedMgr = new ObservedTrafficManager(viewer);
+const observedMgr = new ObservedTrafficManager(viewer, 'live');
+const replayMgr = new ObservedTrafficManager(viewer, 'replay');
+replayMgr.setLerpMode(true, 500);
 const chartMgr = new ChartOverlayManager(viewer);
 
 // ── Connect WebSocket ───────────────────────────────
@@ -171,6 +175,10 @@ const compassRing = document.querySelector(
   'compass-ring',
 ) as CompassRing;
 compassRing.setViewer(viewer);
+const measureTool = document.querySelector(
+  'measure-tool',
+) as MeasureTool;
+measureTool.setViewer(viewer);
 const wxTimeStrip = document.querySelector(
   'weather-time-strip',
 ) as WeatherTimeStrip;
@@ -921,12 +929,12 @@ function schedulePirepFetch(): void {
 import { replayController } from './services/replay';
 
 replayController.onTrails((trails) => {
-  observedMgr.setFullTrails(trails);
+  replayMgr.setFullTrails(trails);
 });
 
 replayController.onData((data: any) => {
-  observedMgr.update(data.items || []);
-  observedMgr.updateConflicts(
+  replayMgr.update(data.items || []);
+  replayMgr.updateConflicts(
     data.confpairs || [],
     data.lospairs || [],
   );
@@ -963,10 +971,9 @@ let _lastReplayEpochSync = 0;
 
 replayController.onChange((state) => {
   if (state.active) {
-    if (!observedMgr.visible) {
-      observedMgr.setVisible(true);
-      toolbar.showLiveTraffic = true;
-      layerPanel.setLayerState('live-traffic', true);
+    if (!replayMgr.visible) {
+      replayMgr.setVisible(true);
+      layerPanel.setLayerState('replay-traffic', true);
     }
 
     // Sync sim clock on significant time jumps (>30s).
@@ -986,14 +993,17 @@ replayController.onChange((state) => {
     _lastReplayPlaying = state.playing;
 
     // Sync speed.
-    if (state.speed !== _lastReplaySpeed && state.playing) {
-      ws.sendCommand(`DTMULT ${state.speed}`);
+    if (state.speed !== _lastReplaySpeed) {
+      replayMgr.setLerpSpeed(state.speed);
+      if (state.playing) {
+        ws.sendCommand(`DTMULT ${state.speed}`);
+      }
     }
     _lastReplaySpeed = state.speed;
 
   } else {
-    observedMgr.update([]);
-    observedMgr.clearTrails();
+    replayMgr.update([]);
+    replayMgr.clearTrails();
     if (_lastReplayPlaying) {
       ws.sendCommand('HOLD');
       _lastReplayPlaying = false;
@@ -1007,7 +1017,6 @@ let liveTimer: number | null = null;
 
 async function fetchLiveTraffic(): Promise<void> {
   if (!observedMgr.visible) return;
-  if (replayController.state.active) return;
   const b = currentViewBounds();
   if (!b) return;
   if (b.lonW >= b.lonE || b.latS >= b.latN) return;
@@ -1521,17 +1530,25 @@ handler.setInputAction(
           return;
         }
       }
-      // Observed/replay aircraft — toggle trail.
+      // Live aircraft — toggle trail.
       if (name.startsWith('live-')) {
         const icao = name.replace('live-', '');
         const nowOn = observedMgr.toggleTrailForAircraft(icao);
         const info = observedMgr.getAircraftInfo(icao);
         const cs = info?.callsign || icao;
-        const tc = info?.typecode || '';
-        const reg = info?.registration || '';
         cmdConsole.echo(
-          `[${info?.source === 'REPLAY' ? 'REPLAY' : 'LIVE'}] `
-          + `${cs} ${tc} ${reg} — trail ${nowOn ? 'ON' : 'OFF'}`,
+          `[LIVE] ${cs} ${info?.typecode || ''} ${info?.registration || ''} — trail ${nowOn ? 'ON' : 'OFF'}`,
+        );
+        return;
+      }
+      // Replay aircraft — toggle trail.
+      if (name.startsWith('replay-')) {
+        const icao = name.replace('replay-', '');
+        const nowOn = replayMgr.toggleTrailForAircraft(icao);
+        const info = replayMgr.getAircraftInfo(icao);
+        const cs = info?.callsign || icao;
+        cmdConsole.echo(
+          `[REPLAY] ${cs} ${info?.typecode || ''} ${info?.registration || ''} — trail ${nowOn ? 'ON' : 'OFF'}`,
         );
         return;
       }
@@ -1648,21 +1665,23 @@ document.addEventListener(
       case 'trails':
         trailMgr.setVisible(visible);
         observedMgr.setTrailsVisible(visible);
+        replayMgr.setTrailsVisible(visible);
         // Tell BlueSky sim to start/stop trails.
         ws.sendCommand(visible ? 'TRAIL ON' : 'TRAIL OFF');
         if (!visible) {
           trailMgr.clear();
           observedMgr.clearTrails();
+          replayMgr.clearTrails();
         }
         break;
       case 'trails-display':
-        // Backend-initiated state change — just update
-        // display, don't re-send TRAIL command.
         trailMgr.setVisible(visible);
         observedMgr.setTrailsVisible(visible);
+        replayMgr.setTrailsVisible(visible);
         if (!visible) {
           trailMgr.clear();
           observedMgr.clearTrails();
+          replayMgr.clearTrails();
         }
         break;
       case 'routes':
@@ -1674,10 +1693,12 @@ document.addEventListener(
       case 'leaders':
         aircraftMgr.setLeadersVisible(visible);
         observedMgr.setLeadersVisible(visible);
+        replayMgr.setLeadersVisible(visible);
         break;
       case 'pz':
         aircraftMgr.setPzVisible(visible);
         observedMgr.setPzVisible(visible);
+        replayMgr.setPzVisible(visible);
         break;
       case 'wind-barbs':
         windBarbMgr.setVisible(visible);
@@ -1715,6 +1736,13 @@ document.addEventListener(
           scheduleLiveFetch();
         } else {
           observedMgr.update([]);
+        }
+        break;
+      case 'replay-traffic':
+        replayMgr.setVisible(visible);
+        if (!visible) {
+          replayMgr.update([]);
+          replayMgr.clearTrails();
         }
         break;
       case 'interpolation':
@@ -1924,6 +1952,7 @@ document.addEventListener(
     procedureMgr.setAltScale(scale);
     pirepMgr.setAltScale(scale);
     observedMgr.setAltScale(scale);
+    replayMgr.setAltScale(scale);
     scheduleWindFieldFetch();
   }) as EventListener,
 );
@@ -1940,6 +1969,7 @@ airspaceMgr.setAltScale(2);
 procedureMgr.setAltScale(2);
 pirepMgr.setAltScale(2);
 observedMgr.setAltScale(2);
+replayMgr.setAltScale(2);
 
 // ── Layer-opacity routing ──────────────────────────
 // The opacity service is the single source of

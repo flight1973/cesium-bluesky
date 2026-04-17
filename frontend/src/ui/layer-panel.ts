@@ -17,7 +17,8 @@ interface LayerGroup {
 const LAYER_TREE: LayerGroup[] = [
   {
     id: 'traffic', label: 'Traffic', expanded: true, items: [
-      { id: 'live-traffic', label: 'Live / Replay', defaultOn: false },
+      { id: 'live-traffic', label: 'Live Traffic', defaultOn: false },
+      { id: 'replay-traffic', label: 'Replay Traffic', defaultOn: false },
       { id: 'interpolation', label: 'Interpolation', defaultOn: true },
       { id: 'trails', label: 'Trails', defaultOn: false },
       { id: 'leaders', label: 'Velocity Vectors', defaultOn: true },

@@ -170,7 +170,7 @@ class ReplayController {
       this._fetchTimer = null;
       this._fetch();
       if (this._state.playing) this._scheduleFetch();
-    }, 2000);
+    }, 500);
   }
 
   private _trailDebounce: number | null = null;

@@ -367,6 +367,64 @@ def get_trails(
     return trails
 
 
+def get_snapshot_with_trajectory(
+    label: str,
+    epoch: int,
+    tolerance: int = 10,
+    lookahead: int = 30,
+    step: int = 10,
+) -> list[dict]:
+    """Get aircraft positions at epoch plus short future
+    trajectory for spline interpolation.
+
+    Each item includes a ``trajectory`` list of
+    [dt, lat, lon, alt_m, gs_kt, trk_deg, vs_fpm]
+    where dt is seconds relative to epoch.
+    """
+    items = get_snapshot(label, epoch, tolerance)
+    if not items:
+        return items
+
+    conn = _connect()
+    _ensure_schema(conn)
+
+    icaos = [a['icao24'] for a in items]
+    placeholders = ",".join("?" * len(icaos))
+    rows = conn.execute(f"""
+        SELECT icao24, time, lat, lon,
+               COALESCE(geo_alt, baro_alt, 0) AS alt,
+               velocity, heading, vertrate
+        FROM replay_states
+        WHERE session = ?
+          AND time BETWEEN ? AND ?
+          AND icao24 IN ({placeholders})
+        ORDER BY icao24, time
+    """, [label, epoch - tolerance, epoch + lookahead]
+       + [h.lower() for h in icaos]).fetchall()
+    conn.close()
+
+    traj_map: dict[str, list] = {}
+    for r in rows:
+        icao = r['icao24']
+        if icao not in traj_map:
+            traj_map[icao] = []
+        vel = r['velocity'] or 0
+        hdg = r['heading'] or 0
+        vr = r['vertrate'] or 0
+        traj_map[icao].append([
+            r['time'] - epoch,
+            r['lat'], r['lon'], r['alt'],
+            vel * _MS_TO_KT,
+            hdg,
+            vr * _MS_TO_FPM,
+        ])
+
+    for item in items:
+        item['trajectory'] = traj_map.get(
+            item['icao24'], [])
+    return items
+
+
 def get_time_range(label: str) -> tuple[int, int] | None:
     conn = _connect()
     _ensure_schema(conn)
