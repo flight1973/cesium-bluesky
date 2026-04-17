@@ -31,6 +31,7 @@ import bluesky as bs
 from cesium_app.surveillance.conflict_detect import (
     detect_conflicts as standalone_detect,
 )
+from cesium_app.surveillance.mvp_resolution import resolve_all
 
 logger = logging.getLogger(__name__)
 
@@ -122,13 +123,16 @@ def detect(
     if m == 'standalone':
         result = standalone_detect(items)
         result['source'] = 'standalone'
+        result['advisories'] = resolve_all(items, result)
         return result
 
     # Hybrid: run standalone on observed, read ASAS
     # for sim, merge and deduplicate.
     standalone = standalone_detect(items)
     asas = get_asas_conflicts()
-    return _merge(standalone, asas)
+    merged = _merge(standalone, asas)
+    merged['advisories'] = resolve_all(items, merged)
+    return merged
 
 
 def _merge(a: dict, b: dict) -> dict:
