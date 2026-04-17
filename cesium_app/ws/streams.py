@@ -23,6 +23,7 @@ _last_siminfo_seq: int = 0
 _cmdlog_pending: list[dict] = []
 
 
+
 @router.websocket("/ws/sim")
 async def websocket_sim(ws: WebSocket) -> None:
     """Multiplexed WebSocket for simulation state streaming.

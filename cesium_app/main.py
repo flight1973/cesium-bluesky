@@ -18,14 +18,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from cesium_app.api import airspace as airspace_api
 from cesium_app.api import areas
+from cesium_app.api import cache as cache_api
 from cesium_app.api import cmdlog
+from cesium_app.api import credentials as creds_api
 from cesium_app.api import commands
+from cesium_app.api import docs as docs_api
 from cesium_app.api import navdata
+from cesium_app.api import pan as pan_api
+from cesium_app.api import procedures as procedures_api
+from cesium_app.api import routes as routes_api
 from cesium_app.api import scenario
+from cesium_app.api import surveillance as surv_api
 from cesium_app.api import simulation
 from cesium_app.api import state as state_api
 from cesium_app.api import traffic
+from cesium_app.api import weather as weather_api
+from cesium_app.api import wind
 from cesium_app.config import settings
 from cesium_app.sim.bridge import SimBridge
 from cesium_app.ws import streams as ws_streams
@@ -52,6 +62,19 @@ async def lifespan(app: FastAPI):
     bridge.start()
     app.state.bridge = bridge
     logger.info("Cesium-BlueSky service ready")
+
+    # Register known integrations so the credentials
+    # panel shows them even before any secrets are set.
+    from cesium_app.credentials import (
+        register_known_integrations,
+    )
+    try:
+        register_known_integrations()
+    except Exception:  # noqa: BLE001
+        logger.debug(
+            "Credential registry init skipped",
+            exc_info=True,
+        )
 
     # Start the WebSocket broadcast background task.
     broadcast_task = asyncio.create_task(
@@ -90,6 +113,16 @@ app.include_router(navdata.router)
 app.include_router(areas.router)
 app.include_router(state_api.router)
 app.include_router(cmdlog.router)
+app.include_router(wind.router)
+app.include_router(weather_api.router)
+app.include_router(airspace_api.router)
+app.include_router(cache_api.router)
+app.include_router(creds_api.router)
+app.include_router(procedures_api.router)
+app.include_router(routes_api.router)
+app.include_router(surv_api.router)
+app.include_router(pan_api.router)
+app.include_router(docs_api.router)
 app.include_router(ws_streams.router)
 
 
@@ -102,6 +135,37 @@ async def health() -> dict:
             "healthy" if bridge.is_running else "degraded"
         ),
         "sim_running": bridge.is_running,
+    }
+
+
+@app.get("/api/health/ready")
+async def readiness() -> dict:
+    """Readiness check — confirms all backing services
+    are available.  Used by Docker HEALTHCHECK and
+    orchestrators to decide when the container is
+    ready to serve traffic.
+    """
+    checks: dict[str, bool] = {}
+    # Sim
+    bridge: SimBridge = app.state.bridge
+    checks["sim"] = bridge.is_running
+    # SQLite
+    try:
+        from cesium_app.store.db import db_exists
+        checks["sqlite"] = db_exists()
+    except Exception:
+        checks["sqlite"] = False
+    # Neo4j
+    try:
+        from cesium_app.store import graph_db
+        graph_db.driver().verify_connectivity()
+        checks["neo4j"] = True
+    except Exception:
+        checks["neo4j"] = False
+    ready = all(checks.values())
+    return {
+        "ready": ready,
+        "checks": checks,
     }
 
 

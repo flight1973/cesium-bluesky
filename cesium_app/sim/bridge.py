@@ -15,6 +15,7 @@ from typing import Any, Callable
 import bluesky as bs
 from bluesky.core.walltime import Timer
 
+from cesium_app.sim.smooth_bank import SmoothBankController
 from cesium_app.sim.state_collector import StateCollector
 
 logger = logging.getLogger(__name__)
@@ -33,29 +34,39 @@ def _state_name(state: int) -> str:
     return _STATE_NAMES.get(state, f"UNKNOWN({state})")
 
 
-def _compute_bank_deg(idx: int) -> float:
+def _compute_bank_deg(
+    idx: int,
+    bank_controller=None,
+) -> float:
     """Current bank angle in degrees (signed).
 
     Positive = right bank, negative = left.  Returns 0
-    when the aircraft is not turning.
+    when the aircraft is wings-level.
+
+    With a ``SmoothBankController`` supplied, reads the
+    smoothly-integrated bank directly (authoritative
+    source).  Without one, falls back to BlueSky's
+    discrete model: magnitude from ``ap.turnphi`` (or
+    ``ap.bankdef``), sign from the heading-to-target
+    delta.
     """
+    if bank_controller is not None:
+        return bank_controller.get_bank_deg_signed(idx)
     try:
         import numpy as np
         ap = bs.traf.ap
-        eps = getattr(bs.traf, 'eps', 1e-6)
-        phi = (
-            ap.turnphi[idx] if ap.turnphi[idx]
-            > eps * eps else ap.bankdef[idx]
-        )
-        delhdg = (
-            (ap.hdg[idx] - bs.traf.hdg[idx] + 180)
-            % 360 - 180
-        )
-        sign = 1 if delhdg > 0 else -1 if delhdg < 0 else 0
-        if not bool(bs.traf.swhdgsel[idx]):
+        eps = float(getattr(bs.traf, 'eps', 1e-6))
+        turnphi = float(np.asarray(ap.turnphi[idx]).item())
+        bankdef = float(np.asarray(ap.bankdef[idx]).item())
+        phi = turnphi if turnphi > eps * eps else bankdef
+        target = float(np.asarray(ap.trk[idx]).item())
+        current = float(np.asarray(bs.traf.hdg[idx]).item())
+        delhdg = (target - current + 180) % 360 - 180
+        if abs(delhdg) < 0.5:
             return 0.0
+        sign = 1 if delhdg > 0 else -1
         return float(np.degrees(phi) * sign)
-    except (AttributeError, IndexError):
+    except (AttributeError, IndexError, ValueError):
         return 0.0
 
 
@@ -63,11 +74,51 @@ def _compute_bank_limit_deg(idx: int) -> float:
     """Configured bank limit for this aircraft, in degrees."""
     try:
         import numpy as np
-        return float(
-            np.degrees(bs.traf.ap.bankdef[idx]),
-        )
-    except (AttributeError, IndexError):
+        val = np.asarray(bs.traf.ap.bankdef[idx]).item()
+        return float(np.degrees(val))
+    except (AttributeError, IndexError, ValueError):
         return 25.0
+
+
+def _compute_pitch_deg(idx: int) -> float:
+    """Current pitch attitude in degrees (signed).
+
+    Positive = nose up, negative = nose down.  Kinematic
+    approximation from the flight-path angle:
+        sin(γ) = VS / TAS
+    We use the flight-path angle as a proxy for pitch.
+    A true pitch measurement would add angle of attack
+    (typically 2–5° at cruise), which BlueSky doesn't
+    model.  Accurate enough for display and for the
+    planned chase/pilot camera views.
+    """
+    import math
+    try:
+        import numpy as np
+        tas = float(np.asarray(bs.traf.tas[idx]).item())
+        vs = float(np.asarray(bs.traf.vs[idx]).item())
+        if tas < 0.1:
+            return 0.0
+        ratio = max(-1.0, min(1.0, vs / tas))
+        return float(math.degrees(math.asin(ratio)))
+    except (AttributeError, IndexError, ValueError):
+        return 0.0
+
+
+def _get_wind_north(idx: int) -> float:
+    """Sampled north wind component (m/s) for aircraft idx."""
+    try:
+        return float(bs.traf.windnorth[idx])
+    except (AttributeError, IndexError):
+        return 0.0
+
+
+def _get_wind_east(idx: int) -> float:
+    """Sampled east wind component (m/s) for aircraft idx."""
+    try:
+        return float(bs.traf.windeast[idx])
+    except (AttributeError, IndexError):
+        return 0.0
 
 
 def _sender_label(sender_id: object) -> str:
@@ -105,6 +156,12 @@ class SimBridge:
         self._started = threading.Event()
         self._initialized = False
         self.collector = StateCollector()
+        # Roll-rate-aware turn dynamics, replacing
+        # BlueSky's discrete bank model.  Installed in
+        # start(); tick()ed in _run_loop before every
+        # bs.sim.update() so turnphi reflects the smooth
+        # bank magnitude when BlueSky computes turn rate.
+        self.bank_controller = SmoothBankController()
 
         # Rolling log of commands submitted to the stack.
         # Captured from ALL sources: REST, WS, scenario files.
@@ -113,6 +170,23 @@ class SimBridge:
         )
         self._cmd_log_lock = threading.Lock()
         self._cmd_listeners: list[Callable[[dict], Any]] = []
+
+        # Shadow list of user-defined wind points, kept in
+        # sync by parsing every WIND command that flows
+        # through the stack.  Each entry:
+        #   {"lat", "lon", "altitude_ft" (float|None),
+        #    "direction_deg", "speed_kt"}
+        # Populated from the command log hook below so
+        # points defined via REST, WS, scenario file, or
+        # typed in the console are all captured.
+        self._wind_points: list[dict] = []
+        self._wind_points_lock = threading.Lock()
+        # When set, the next WIND command processed by
+        # ``_maybe_update_wind_points`` records points
+        # with this origin string instead of the default
+        # ``"user"``.  Used by the METAR-import path to
+        # tag auto-generated points.
+        self._pending_origin: str | None = None
 
     def start(self) -> None:
         """Initialize BlueSky and start the sim loop thread."""
@@ -136,6 +210,8 @@ class SimBridge:
         )
         self._initialized = True
         self.collector.install()
+        self.bank_controller.install()
+        self.collector.bank_controller = self.bank_controller
         self._install_command_log_hook()
 
         self._thread = threading.Thread(
@@ -292,8 +368,14 @@ class SimBridge:
             "sel_vs": float(ap.vs[idx]),
             "lnav": bool(bs.traf.swlnav[idx]),
             "vnav": bool(bs.traf.swvnav[idx]),
-            "bank": _compute_bank_deg(idx),
+            "bank": _compute_bank_deg(
+                idx, self.bank_controller,
+            ),
             "bank_limit": _compute_bank_limit_deg(idx),
+            "pitch": _compute_pitch_deg(idx),
+            "yaw": float(bs.traf.hdg[idx]),
+            "wind_north_ms": _get_wind_north(idx),
+            "wind_east_ms": _get_wind_east(idx),
             "route": {
                 "iactwp": route.iactwp,
                 "wpname": list(route.wpname),
@@ -414,6 +496,17 @@ class SimBridge:
         with self._cmd_log_lock:
             self._cmd_log.append(entry)
 
+        # Keep the defined-wind-points shadow list in
+        # sync — catches WIND commands from any source.
+        self._maybe_update_wind_points(cmd)
+
+        # NOTE: PAN commands are no longer intercepted
+        # here — they're handled per-client on the
+        # frontend so one browser's ``PAN KDFW`` doesn't
+        # reset every other user's view.  The resolver
+        # is still exposed via REST
+        # (``/api/pan/resolve``) for frontend use.
+
         # Notify listeners (e.g. WS broadcaster).
         for cb in list(self._cmd_listeners):
             try:
@@ -422,6 +515,326 @@ class SimBridge:
                 logger.warning(
                     "Command listener failed: %s", exc,
                 )
+
+    def _maybe_update_wind_points(self, cmd: str) -> None:
+        """Parse a WIND command and update the shadow list.
+
+        Also handles the custom origin marker used by the
+        METAR-import path: when a command is prefixed with
+        ``# origin=<tag>`` on the previous line or starts
+        with the tag we set via ``_pending_origin``, the
+        resulting wind point records that origin.
+        Everything else (REST, console, scenario files,
+        internal BlueSky code) defaults to origin="user".
+        """
+        parts = cmd.strip().replace(",", " ").split()
+        if not parts or parts[0].upper() != "WIND":
+            return
+        try:
+            lat = float(parts[1])
+            lon = float(parts[2])
+            tail = parts[3:]
+
+            if tail and tail[0].upper() == "DEL":
+                with self._wind_points_lock:
+                    self._wind_points.clear()
+                return
+
+            origin = self._pending_origin or "user"
+
+            with self._wind_points_lock:
+                if len(tail) == 2:
+                    # 2D form: dir spd
+                    self._wind_points.append({
+                        "lat": lat,
+                        "lon": lon,
+                        "altitude_ft": None,
+                        "direction_deg": float(tail[0]),
+                        "speed_kt": float(tail[1]),
+                        "origin": origin,
+                    })
+                elif len(tail) >= 3 and len(tail) % 3 == 0:
+                    # 3D form: triplets of (alt, dir, spd)
+                    for i in range(0, len(tail), 3):
+                        self._wind_points.append({
+                            "lat": lat,
+                            "lon": lon,
+                            "altitude_ft": float(tail[i]),
+                            "direction_deg": float(tail[i + 1]),
+                            "speed_kt": float(tail[i + 2]),
+                            "origin": origin,
+                        })
+        except (ValueError, IndexError):
+            # Malformed WIND command — BlueSky will reject
+            # it with its own error; don't mutate state.
+            pass
+
+    def get_wind_points(self) -> list[dict]:
+        """Return a copy of the defined wind points."""
+        with self._wind_points_lock:
+            return [dict(p) for p in self._wind_points]
+
+    # ── PAN target resolution ────────────────────────
+
+    def _resolve_pan_target(
+        self,
+        identifier: str,
+    ) -> dict | None:
+        """Resolve identifier to lat/lon/view-alt/kind.
+
+        Lookup order: aircraft → airport → waypoint →
+        lat,lon pair.  Returns None if no match.
+        """
+        ident = identifier.upper().strip()
+
+        # 1. Aircraft by callsign.
+        try:
+            idx = bs.traf.id2idx(ident)
+            if idx >= 0:
+                return {
+                    "kind": "aircraft",
+                    "lat": float(bs.traf.lat[idx]),
+                    "lon": float(bs.traf.lon[idx]),
+                    "alt_m_view": 100_000.0,
+                }
+        except (AttributeError, IndexError):
+            pass
+
+        # 2. Airport by ICAO.
+        try:
+            aptid = list(bs.navdb.aptid)
+            if ident in aptid:
+                i = aptid.index(ident)
+                return {
+                    "kind": "airport",
+                    "lat": float(bs.navdb.aptlat[i]),
+                    "lon": float(bs.navdb.aptlon[i]),
+                    "alt_m_view": 50_000.0,
+                }
+        except (AttributeError, IndexError, ValueError):
+            pass
+
+        # 3. Waypoint / navaid.
+        try:
+            wpid = list(bs.navdb.wpid)
+            if ident in wpid:
+                i = wpid.index(ident)
+                return {
+                    "kind": "waypoint",
+                    "lat": float(bs.navdb.wplat[i]),
+                    "lon": float(bs.navdb.wplon[i]),
+                    "alt_m_view": 100_000.0,
+                }
+        except (AttributeError, IndexError, ValueError):
+            pass
+
+        # 4. Explicit lat,lon.
+        if "," in identifier:
+            parts = [p.strip() for p in identifier.split(",")]
+            if len(parts) == 2:
+                try:
+                    lat = float(parts[0])
+                    lon = float(parts[1])
+                    if (
+                        -90 <= lat <= 90
+                        and -180 <= lon <= 180
+                    ):
+                        return {
+                            "kind": "latlon",
+                            "lat": lat,
+                            "lon": lon,
+                            "alt_m_view": 50_000.0,
+                        }
+                except ValueError:
+                    pass
+        return None
+
+    def delete_wind_point(
+        self,
+        lat: float,
+        lon: float,
+        altitude_ft: float | None,
+    ) -> bool:
+        """Delete one defined wind point.
+
+        BlueSky does not support deleting a single wind
+        point — ``WIND ... DEL`` clears the whole field.
+        So we clear and replay every remaining point.
+
+        Returns True if the point was found and removed,
+        False otherwise.
+        """
+        with self._wind_points_lock:
+            def _matches(p: dict) -> bool:
+                return (
+                    abs(p["lat"] - lat) < 1e-4
+                    and abs(p["lon"] - lon) < 1e-4
+                    and p["altitude_ft"] == altitude_ft
+                )
+
+            kept = [
+                p for p in self._wind_points
+                if not _matches(p)
+            ]
+            if len(kept) == len(self._wind_points):
+                return False
+            # Clear the shadow; the replayed WIND
+            # commands will rebuild it via the hook.
+            self._wind_points.clear()
+
+        # Clear all wind in the sim, then replay.
+        self.stack_command("WIND 0 0 DEL")
+        # Group by (lat, lon): 2D points first (single
+        # command each), then 3D triplets for same
+        # (lat, lon) coalesced into one command.
+        from collections import defaultdict
+        pts_2d = [p for p in kept if p["altitude_ft"] is None]
+        pts_3d = [p for p in kept if p["altitude_ft"] is not None]
+
+        self._replay_wind_points(pts_2d, pts_3d)
+        return True
+
+    def _replay_wind_points(
+        self,
+        pts_2d: list[dict],
+        pts_3d: list[dict],
+    ) -> None:
+        """Re-stack a list of wind points.
+
+        Each point is stacked with its recorded origin
+        so the shadow list keeps user / metar origins
+        correctly.  Callers should hold the relevant
+        lock *before* mutating ``_wind_points`` and
+        then call this without the lock (stack_command
+        doesn't need the wind lock).
+        """
+        from collections import defaultdict
+        for p in pts_2d:
+            self._pending_origin = p.get("origin", "user")
+            self.stack_command(
+                f"WIND {p['lat']:.4f} {p['lon']:.4f} "
+                f"{p['direction_deg']:.1f} "
+                f"{p['speed_kt']:.1f}"
+            )
+            self._pending_origin = None
+
+        by_pos: dict[
+            tuple[float, float, str], list[dict],
+        ] = defaultdict(list)
+        for p in pts_3d:
+            origin = p.get("origin", "user")
+            key = (
+                round(p["lat"], 4),
+                round(p["lon"], 4),
+                origin,
+            )
+            by_pos[key].append(p)
+
+        for (plat, plon, origin), plist in by_pos.items():
+            plist_sorted = sorted(
+                plist, key=lambda q: q["altitude_ft"] or 0,
+            )
+            triplets = " ".join(
+                f"{p['altitude_ft']:.0f} "
+                f"{p['direction_deg']:.1f} "
+                f"{p['speed_kt']:.1f}"
+                for p in plist_sorted
+            )
+            self._pending_origin = origin
+            self.stack_command(
+                f"WIND {plat} {plon} {triplets}"
+            )
+            self._pending_origin = None
+
+    def import_metar_winds(
+        self,
+        observations: list[dict],
+    ) -> int:
+        """Replace METAR-origin wind points with a new set.
+
+        ``observations`` items: {icao, lat, lon,
+        wdir_deg, wspd_kt}.  Missing wind → skipped.
+
+        Keeps user-origin points intact by clearing all
+        wind and replaying the non-METAR subset plus
+        the new METAR observations.  Returns the count
+        of METAR winds actually stacked.
+        """
+        with self._wind_points_lock:
+            user_pts = [
+                p for p in self._wind_points
+                if not (p.get("origin", "user"))
+                .startswith("metar")
+            ]
+            self._wind_points.clear()
+
+        # Clear all wind on the sim side.
+        self.stack_command("WIND 0 0 DEL")
+
+        # Replay user-origin points.
+        user_2d = [
+            p for p in user_pts
+            if p["altitude_ft"] is None
+        ]
+        user_3d = [
+            p for p in user_pts
+            if p["altitude_ft"] is not None
+        ]
+        self._replay_wind_points(user_2d, user_3d)
+
+        # Stack new METAR winds as 2D points.
+        count = 0
+        for obs in observations:
+            try:
+                lat = float(obs["lat"])
+                lon = float(obs["lon"])
+                wdir = obs.get("wdir_deg")
+                wspd = obs.get("wspd_kt")
+                if wdir is None or wspd is None:
+                    continue
+                # AWC returns "VRB" or numeric strings;
+                # our normalized shape uses ints/floats.
+                if not isinstance(wdir, (int, float)):
+                    continue
+                if not isinstance(wspd, (int, float)):
+                    continue
+                if wspd < 1:
+                    # Effectively calm — don't pollute
+                    # the field with zero-speed points.
+                    continue
+                icao = str(obs.get("icao") or "?")
+                self._pending_origin = f"metar:{icao}"
+                self.stack_command(
+                    f"WIND {lat:.4f} {lon:.4f} "
+                    f"{float(wdir):.1f} {float(wspd):.1f}"
+                )
+                self._pending_origin = None
+                count += 1
+            except (KeyError, TypeError, ValueError):
+                continue
+        return count
+
+    def clear_metar_winds(self) -> int:
+        """Remove METAR-origin wind points; keep user."""
+        with self._wind_points_lock:
+            user_pts = [
+                p for p in self._wind_points
+                if not (p.get("origin", "user"))
+                .startswith("metar")
+            ]
+            removed = len(self._wind_points) - len(user_pts)
+            self._wind_points.clear()
+        self.stack_command("WIND 0 0 DEL")
+        user_2d = [
+            p for p in user_pts
+            if p["altitude_ft"] is None
+        ]
+        user_3d = [
+            p for p in user_pts
+            if p["altitude_ft"] is not None
+        ]
+        self._replay_wind_points(user_2d, user_3d)
+        return removed
 
     # ── Private ──────────────────────────────────────────
 
@@ -444,6 +857,13 @@ class SimBridge:
             try:
                 Timer.update_timers()
                 bs.net.update()
+                # Integrate smooth bank before BlueSky
+                # runs its traffic update — we write
+                # turnphi here, BlueSky reads it there.
+                if bs.sim.state == bs.OP:
+                    self.bank_controller.tick(
+                        float(bs.sim.simdt),
+                    )
                 bs.sim.update()
                 bs.scr.update()
             except Exception as exc:  # pylint: disable=broad-except
