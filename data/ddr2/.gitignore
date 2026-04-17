@@ -1,0 +1,6 @@
+# DDR2 data files are licensed by EUROCONTROL —
+# don't commit them.  Only the README + .gitignore
+# tracked.
+*
+!.gitignore
+!README.md
