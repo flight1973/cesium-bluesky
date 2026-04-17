@@ -184,9 +184,10 @@ export function createViewer(
     viewer.imageryLayers.addImageryProvider(p);
   });
 
+  // Default camera over KDFW (Dallas/Fort Worth).
   viewer.camera.setView({
     destination: Cartesian3.fromDegrees(
-      4.76, 52.3, 500000,
+      -97.0403, 32.8998, 500000,
     ),
     orientation: {
       heading: CesiumMath.toRadians(0),
@@ -292,11 +293,4 @@ export async function applyIonConfig(
 
   setIonToken(token);
   console.log('[Cesium] Ion token set — Ion enabled');
-
-  // Switch to Bing aerial as a nicer default.
-  try {
-    await setImagery(viewer, ION_IMAGERY[0]);
-  } catch {
-    // Token may be invalid — keep open basemap.
-  }
 }

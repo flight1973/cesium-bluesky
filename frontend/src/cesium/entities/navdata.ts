@@ -19,6 +19,7 @@ import {
 } from 'cesium';
 
 const APT_COLOR = new Color(0.6, 0.8, 1.0, 0.9);
+const APT_METAR_RING = new Color(0.4, 1.0, 0.4, 0.85);
 const RWY_COLOR = new Color(0.5, 0.5, 0.5, 1.0);
 const WPT_COLOR = new Color(0.6, 0.8, 1.0, 0.5);
 
@@ -32,6 +33,11 @@ export class NavdataManager {
   private _lastBounds = '';
   private _aptVisible = true;
   private _wptVisible = false;
+  private _airportById = new Map<string, any>();
+  /** ICAO codes that publish METARs.  Renders a
+   * green outline ring on those airports so users
+   * can quickly spot weather-reporting fields. */
+  private _metarStations = new Set<string>();
 
   constructor(private viewer: Viewer) {
     this.aptSource = new CustomDataSource('airports');
@@ -151,21 +157,67 @@ export class NavdataManager {
     }
   }
 
+  /** Lookup airport record by ICAO from the last fetch. */
+  findAirport(id: string): any | null {
+    return this._airportById.get(id.toUpperCase()) ?? null;
+  }
+
+  /** Replace the set of ICAOs known to publish METARs.
+   * Called by main.ts after fetching
+   * ``/api/weather/stations`` for the current view.
+   * Re-renders airports so badges update. */
+  setMetarStations(icaos: Iterable<string>): void {
+    const fresh = new Set<string>();
+    for (const c of icaos) fresh.add(c.toUpperCase());
+    // Cheap diff — bail when unchanged so we don't
+    // tear down the airport entities unnecessarily.
+    if (fresh.size === this._metarStations.size
+        && [...fresh].every(
+          (c) => this._metarStations.has(c),
+        )) {
+      return;
+    }
+    this._metarStations = fresh;
+    // Re-render existing airports with new badges.
+    if (this._airportById.size) {
+      this._renderAirports(
+        Array.from(this._airportById.values()),
+        this._lastZoom,
+      );
+    }
+  }
+
+  private _lastZoom = 0;
+
   private _renderAirports(
     airports: any[],
     zoom: number,
   ): void {
     this.aptSource.entities.removeAll();
+    this._airportById.clear();
+    this._lastZoom = zoom;
 
     for (const apt of airports) {
-      // Airport label.
+      this._airportById.set(apt.id, apt);
+      const entKey = `apt-${apt.id}`;
+      const isMetar = this._metarStations.has(apt.id);
+      // Airport label — name is the pickable id used
+      // by main.ts' click handler to open the
+      // procedures panel for this airport.
       this.aptSource.entities.add({
+        id: entKey,
+        name: entKey,
         position: Cartesian3.fromDegrees(
           apt.lon, apt.lat, 0,
         ),
         point: {
           pixelSize: apt.type === 1 ? 6 : 4,
           color: APT_COLOR,
+          // Outline ring marks METAR-reporting
+          // stations — instant visual cue in
+          // weather-tab workflows.
+          outlineColor: isMetar ? APT_METAR_RING : APT_COLOR,
+          outlineWidth: isMetar ? 2 : 0,
         },
         label: {
           text: apt.id,

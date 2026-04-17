@@ -26,6 +26,9 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import { FT, KTS } from '../types';
+import {
+  formatWind, msToUser, speedUnitLabel, onUnitsChange,
+} from '../services/units';
 
 interface AircraftDetail {
   acid: string;
@@ -49,6 +52,10 @@ interface AircraftDetail {
   vnav: boolean;
   bank?: number;
   bank_limit?: number;
+  pitch?: number;
+  yaw?: number;
+  wind_north_ms?: number;
+  wind_east_ms?: number;
   route: {
     iactwp: number;
     wpname: string[];
@@ -66,6 +73,21 @@ export class AircraftPanel extends LitElement {
 
   private onCommand: ((cmd: string) => void) | null = null;
   private refreshTimer: number | null = null;
+  private unitsUnsub: (() => void) | null = null;
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    // Re-render when the user flips unit system.
+    this.unitsUnsub = onUnitsChange(() => {
+      this.requestUpdate();
+    });
+  }
+
+  disconnectedCallback(): void {
+    this.unitsUnsub?.();
+    this.unitsUnsub = null;
+    super.disconnectedCallback();
+  }
 
   static styles = css`
     :host {
@@ -200,6 +222,27 @@ export class AircraftPanel extends LitElement {
     const vs = Math.round(d.vs / FT * 60);
     const r = d.route;
 
+    // Speed readouts in the user's unit system.
+    // TODO: true IAS requires position-error + density
+    // corrections (not just CAS).  Tracked separately.
+    const spdUnit = speedUnitLabel();
+    const iasDisp = Math.round(msToUser(d.cas));
+    const casDisp = Math.round(msToUser(d.cas));
+    const gsDisp = Math.round(msToUser(d.gs));
+    // Mach number from TAS + altitude using the ISA
+    // standard-atmosphere speed-of-sound model.
+    //   Troposphere (h < 11 km): T = 288.15 − 0.0065·h
+    //   Tropopause (11–20 km):   T = 216.65
+    //   Stratosphere (≥ 20 km):  T = 216.65 + 0.001·(h−20000)
+    //   a = 20.0468 · √T  (m/s)
+    const altM = d.alt;
+    let T: number;
+    if (altM < 11000) T = 288.15 - 0.0065 * altM;
+    else if (altM < 20000) T = 216.65;
+    else T = 216.65 + 0.001 * (altM - 20000);
+    const speedOfSound = 20.0468 * Math.sqrt(T);
+    const mach = d.tas / speedOfSound;
+
     return html`
       <div class="header">
         <span>${d.acid} ${d.actype}</span>
@@ -242,6 +285,50 @@ export class AircraftPanel extends LitElement {
             }</span>
           </div>
         ` : nothing}
+        ${d.pitch !== undefined ? html`
+          <div class="field-row">
+            <span class="field-label">PITCH</span>
+            <span class="field-value">${
+              this._fmtPitch(d.pitch)
+            }</span>
+          </div>
+        ` : nothing}
+        ${d.yaw !== undefined ? html`
+          <div class="field-row">
+            <span class="field-label">YAW</span>
+            <span class="field-value">${
+              this._fmtYaw(d.yaw)
+            }</span>
+          </div>
+        ` : nothing}
+        <div class="field-row">
+          <span class="field-label">WIND</span>
+          <span class="field-value">${
+            formatWind(
+              d.wind_north_ms ?? 0,
+              d.wind_east_ms ?? 0,
+            )
+          }</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="field-row">
+          <span class="field-label">IAS</span>
+          <span class="field-value">${iasDisp} ${spdUnit}</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">CAS</span>
+          <span class="field-value">${casDisp} ${spdUnit}</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">GS</span>
+          <span class="field-value">${gsDisp} ${spdUnit}</span>
+        </div>
+        <div class="field-row">
+          <span class="field-label">MACH</span>
+          <span class="field-value">M ${mach.toFixed(3)}</span>
+        </div>
       </div>
 
       <div class="section">
@@ -278,6 +365,22 @@ export class AircraftPanel extends LitElement {
             title="1st person cockpit view — looking
               forward from the pilot's seat"
           >PILOT</button>
+          <button
+            class="toggle-btn on"
+            @click=${() => this._camView(
+              d.acid, 'starboard',
+            )}
+            title="Window view — looking out the right
+              side of the aircraft"
+          >STBD</button>
+          <button
+            class="toggle-btn on"
+            @click=${() => this._camView(
+              d.acid, 'port',
+            )}
+            title="Window view — looking out the left
+              side of the aircraft"
+          >PORT</button>
         </div>
       </div>
 
@@ -349,7 +452,7 @@ export class AircraftPanel extends LitElement {
 
   private _camView(
     acid: string,
-    mode: 'chase' | 'pilot',
+    mode: 'chase' | 'pilot' | 'starboard' | 'port',
   ): void {
     this.dispatchEvent(
       new CustomEvent('cam-view', {
@@ -475,6 +578,25 @@ export class AircraftPanel extends LitElement {
       : '';
     if (abs === 0) return `0\u00B0 level${limStr}`;
     return `${abs}\u00B0 ${dir}${limStr}`;
+  }
+
+  /** Format pitch as "+2.5° ↑ nose up" / "-3° ↓ nose down". */
+  private _fmtPitch(pitch: number): string {
+    const v = Math.round(pitch * 10) / 10;
+    if (Math.abs(v) < 0.1) return '0.0\u00B0 level';
+    const abs = Math.abs(v).toFixed(1);
+    const dir = v > 0
+      ? '\u2191 nose up'
+      : '\u2193 nose down';
+    const sign = v > 0 ? '+' : '-';
+    return `${sign}${abs}\u00B0 ${dir}`;
+  }
+
+  /** Format yaw as a 3-digit compass angle like HDG. */
+  private _fmtYaw(yaw: number): string {
+    const v = Math.round(yaw) % 360;
+    const norm = v < 0 ? v + 360 : v;
+    return `${String(norm).padStart(3, '0')}\u00B0`;
   }
 
   private _fieldRow(

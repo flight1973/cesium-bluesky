@@ -16,6 +16,8 @@ export interface AcData {
   inlos: boolean[];
   bank?: number[];
   bank_limit?: number[];
+  windnorth?: number[];  // m/s — north wind sampled at AC
+  windeast?: number[];   // m/s — east wind sampled at AC
   tcpamax?: number[];
   rpz?: number[];
   hpz?: number[];
@@ -25,6 +27,9 @@ export interface AcData {
   nlos_tot: number;
   translvl: number;  // transition level in meters
 }
+
+/** User-facing unit system. */
+export type UnitSystem = 'aviation' | 'si' | 'imperial';
 
 export interface SimInfo {
   simt: number;
