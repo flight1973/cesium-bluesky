@@ -10,6 +10,7 @@ from cesium_app.surveillance import opensky
 from cesium_app.surveillance import replay
 from cesium_app.surveillance.conflict_detect import detect_conflicts
 from cesium_app.surveillance import trino_download
+from cesium_app.surveillance.airspace_classify import classify_batch
 
 router = APIRouter(
     prefix="/api/surveillance", tags=["surveillance"],
@@ -31,6 +32,15 @@ async def _enrich_and_detect(items: list[dict]) -> dict:
                 ac["model"] = reg.get("model") or ""
                 ac["operator"] = reg.get("operator") or ""
                 ac["owner"] = reg.get("owner") or ""
+
+    # Classify each aircraft's airspace (3D point-in-polygon).
+    if items:
+        class_map = await asyncio.to_thread(
+            classify_batch, items,
+        )
+        for ac in items:
+            ac["airspace_class"] = class_map.get(
+                ac["icao24"], "G")
 
     conflicts = detect_conflicts(items) if items else {
         "confpairs": [], "lospairs": [],

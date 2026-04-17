@@ -4,10 +4,11 @@ Implements the same geometric CD logic as BlueSky's ASAS
 but operates on the ObservedAircraft dict list from the
 live or replay endpoints.
 
-Separation minimums (configurable):
-  - Horizontal: 5 NM (9260 m)
-  - Vertical:   1000 ft (304.8 m)
-  - Lookahead:  300 s (5 min)
+Separation minimums vary by airspace class:
+  Class B terminal: 3 NM / 1000 ft / 180 s
+  Class C terminal: 3 NM / 1000 ft / 180 s
+  Class D tower:    1.5 NM / 500 ft / 120 s
+  En route (E/G):   5 NM / 1000 ft / 300 s
 """
 from __future__ import annotations
 
@@ -18,14 +19,22 @@ FT_TO_M = 0.3048
 KT_TO_MS = 0.514444
 FPM_TO_MS = 0.00508
 
+DEG_TO_M_LAT = 111_320.0
+
+# Per-airspace-class separation standards:
+# (rpz_nm, hpz_ft, tlook_s)
+_SEP_BY_CLASS: dict[str, tuple[float, float, float]] = {
+    'B': (3.0, 1000.0, 180.0),
+    'C': (3.0, 1000.0, 180.0),
+    'D': (1.5, 500.0, 120.0),
+    'E': (5.0, 1000.0, 300.0),
+    'G': (5.0, 1000.0, 300.0),
+}
+
+# Defaults for aircraft without airspace_class field
 RPZ_NM = 5.0
 HPZ_FT = 1000.0
 TLOOK_S = 300.0
-
-RPZ_M = RPZ_NM * NM_TO_M
-HPZ_M = HPZ_FT * FT_TO_M
-
-DEG_TO_M_LAT = 111_320.0
 
 
 def _ll_to_xy(
@@ -87,7 +96,8 @@ def detect_conflicts(
         )
         vs = (a.get('vs_fpm', 0) or 0) * FPM_TO_MS
         cid = a.get('callsign') or a.get('icao24', '?')
-        pos.append((x, y, alt, vx, vy, vs, cid))
+        ac_class = a.get('airspace_class', 'G')
+        pos.append((x, y, alt, vx, vy, vs, cid, ac_class))
 
     confpairs: list[list[str]] = []
     lospairs: list[list[str]] = []
@@ -95,9 +105,17 @@ def detect_conflicts(
     conf_dcpa: list[float] = []
 
     for i in range(n):
-        x1, y1, z1, vx1, vy1, vz1, id1 = pos[i]
+        x1, y1, z1, vx1, vy1, vz1, id1, cls1 = pos[i]
         for j in range(i + 1, n):
-            x2, y2, z2, vx2, vy2, vz2, id2 = pos[j]
+            x2, y2, z2, vx2, vy2, vz2, id2, cls2 = pos[j]
+
+            # Use the more restrictive (tighter) separation
+            # standard of the two aircraft's airspace classes.
+            s1 = _SEP_BY_CLASS.get(cls1, (RPZ_NM, HPZ_FT, TLOOK_S))
+            s2 = _SEP_BY_CLASS.get(cls2, (RPZ_NM, HPZ_FT, TLOOK_S))
+            pair_rpz = min(s1[0], s2[0]) * NM_TO_M
+            pair_hpz = min(s1[1], s2[1]) * FT_TO_M
+            pair_tlook = min(s1[2], s2[2])
 
             dx = x2 - x1
             dy = y2 - y1
@@ -109,7 +127,7 @@ def detect_conflicts(
             dh = math.sqrt(dx * dx + dy * dy)
             dv = abs(dz)
 
-            is_los = dh < rpz and dv < hpz
+            is_los = dh < pair_rpz and dv < pair_hpz
 
             dvh2 = dvx * dvx + dvy * dvy
             if dvh2 < 1e-6:
@@ -126,9 +144,9 @@ def detect_conflicts(
             dz_at_cpa = abs(dz + dvz * tcpa)
 
             is_conf = (
-                dcpa_m < rpz
-                and dz_at_cpa < hpz
-                and 0 <= tcpa <= tlook_s
+                dcpa_m < pair_rpz
+                and dz_at_cpa < pair_hpz
+                and 0 <= tcpa <= pair_tlook
             )
 
             if is_los:
