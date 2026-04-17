@@ -9,6 +9,7 @@ from cesium_app.ingest import aircraft_db
 from cesium_app.surveillance import opensky
 from cesium_app.surveillance import replay
 from cesium_app.surveillance.conflict_detect import detect_conflicts
+from cesium_app.surveillance import trino_download
 
 router = APIRouter(
     prefix="/api/surveillance", tags=["surveillance"],
@@ -144,3 +145,53 @@ async def replay_trails(
         replay.get_trails, label, t_start, t, step,
     )
     return {"trails": trails, "count": len(trails)}
+
+
+@router.post("/replay/download-trino")
+async def download_trino(
+    start: str = Query(
+        ..., description='Start time ISO (e.g. "2024-06-27 15:00")',
+    ),
+    stop: str = Query(
+        ..., description='Stop time ISO',
+    ),
+    bbox: str = Query(
+        ..., description='lat_s,lon_w,lat_n,lon_e',
+    ),
+    label: str = Query(
+        ..., description='Session label',
+    ),
+) -> dict:
+    """Download 1 Hz data from OpenSky Trino.
+
+    Requires approved OpenSky research credentials
+    configured in the credential vault or env vars.
+    Data is stored in the replay database at full
+    1-second resolution.
+    """
+    parts = bbox.split(",")
+    if len(parts) != 4:
+        raise HTTPException(400, "bbox must have 4 values")
+    try:
+        bb = tuple(float(p) for p in parts)
+    except ValueError as exc:
+        raise HTTPException(400, f"bad bbox: {exc}") from exc
+
+    try:
+        n = await asyncio.to_thread(
+            trino_download.download,
+            start, stop, bb, label,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            502, f"Trino query failed: {exc}",
+        ) from exc
+
+    return {
+        "label": label,
+        "rows": n,
+        "resolution": "1Hz",
+        "source": "opensky_trino",
+    }
