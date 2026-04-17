@@ -33,5 +33,13 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Generated data (large, re-downloadable)
+data/aircraft_db.csv
+data/airspace.db
+data/replay.db
+data/cifp/FAACIFP18_*
+data/proj_grids/
+frontend/data/
+
 # AI assistant config
 .claude/
