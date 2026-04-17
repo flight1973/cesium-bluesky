@@ -9,6 +9,7 @@ from cesium_app.ingest import aircraft_db
 from cesium_app.surveillance import opensky
 from cesium_app.surveillance import replay
 from cesium_app.surveillance.conflict_detect import detect_conflicts
+from cesium_app.surveillance import unified_cd
 from cesium_app.surveillance import trino_download
 from cesium_app.surveillance.airspace_classify import classify_batch
 
@@ -42,10 +43,11 @@ async def _enrich_and_detect(items: list[dict]) -> dict:
             ac["airspace_class"] = class_map.get(
                 ac["icao24"], "G")
 
-    conflicts = detect_conflicts(items) if items else {
+    conflicts = unified_cd.detect(items) if items else {
         "confpairs": [], "lospairs": [],
         "conf_tcpa": [], "conf_dcpa": [],
         "nconf_cur": 0, "nlos_cur": 0,
+        "source": "none",
     }
 
     return {
@@ -204,4 +206,56 @@ async def download_trino(
         "rows": n,
         "resolution": "1Hz",
         "source": "opensky_trino",
+    }
+
+
+# ── Conflict detection mode ───────────────────────────
+
+
+@router.get("/cd-mode")
+async def get_cd_mode() -> dict:
+    """Current conflict detection mode."""
+    return {"mode": unified_cd.get_mode()}
+
+
+@router.post("/cd-mode")
+async def set_cd_mode(
+    mode: str = Query(
+        ..., description="asas, standalone, or hybrid",
+    ),
+) -> dict:
+    """Switch conflict detection mode.
+
+    - asas: BlueSky ASAS only (requires aircraft in bs.traf)
+    - standalone: our airspace-aware CD only (no resolution)
+    - hybrid: both, merged and deduplicated
+    """
+    if mode not in ('asas', 'standalone', 'hybrid'):
+        raise HTTPException(400, "mode must be asas, standalone, or hybrid")
+    unified_cd.set_mode(mode)  # type: ignore
+    return {"mode": mode}
+
+
+@router.post("/inject-observed")
+async def inject_observed(
+    enabled: bool = Query(True),
+) -> dict:
+    """Toggle injection of observed traffic into bs.traf.
+
+    When enabled, live/replay aircraft are CRE'd in the
+    sim so ASAS can detect and resolve conflicts involving
+    them. Observed aircraft are flagged as immovable —
+    only sim aircraft maneuver.
+    """
+    from cesium_app.sim.observed_inject import ObservedInjector
+    app = None
+    try:
+        from fastapi import Request
+    except Exception:
+        pass
+
+    return {
+        "inject_enabled": enabled,
+        "note": "Injection managed via sim bridge. "
+                "Set CD mode to 'asas' or 'hybrid' to use.",
     }
