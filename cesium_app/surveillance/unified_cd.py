@@ -31,7 +31,7 @@ import bluesky as bs
 from cesium_app.surveillance.conflict_detect import (
     detect_conflicts as standalone_detect,
 )
-from cesium_app.surveillance.mvp_resolution import resolve_all
+from cesium_app.surveillance import resolution as reso_registry
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +123,8 @@ def detect(
     if m == 'standalone':
         result = standalone_detect(items)
         result['source'] = 'standalone'
-        result['advisories'] = resolve_all(items, result)
+        result['advisories'] = reso_registry.resolve(items, result)
+        result['reso_method'] = reso_registry.get_method()
         return result
 
     # Hybrid: run standalone on observed, read ASAS

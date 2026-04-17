@@ -10,6 +10,7 @@ from cesium_app.surveillance import opensky
 from cesium_app.surveillance import replay
 from cesium_app.surveillance.conflict_detect import detect_conflicts
 from cesium_app.surveillance import unified_cd
+from cesium_app.surveillance import resolution as reso_registry
 from cesium_app.surveillance import trino_download
 from cesium_app.surveillance.airspace_classify import classify_batch
 
@@ -234,6 +235,36 @@ async def set_cd_mode(
         raise HTTPException(400, "mode must be asas, standalone, or hybrid")
     unified_cd.set_mode(mode)  # type: ignore
     return {"mode": mode}
+
+
+@router.get("/reso-method")
+async def get_reso_method() -> dict:
+    """Current conflict resolution algorithm."""
+    return {
+        "method": reso_registry.get_method(),
+        "available": reso_registry.available(),
+    }
+
+
+@router.post("/reso-method")
+async def set_reso_method(
+    method: str = Query(
+        ..., description="Resolution algorithm name",
+    ),
+) -> dict:
+    """Switch conflict resolution algorithm.
+
+    Available: mvp, ssd, eby, swarm, vo, orca, dubins
+    """
+    avail = reso_registry.available()
+    if method not in avail:
+        raise HTTPException(
+            400,
+            f"Unknown method '{method}'. "
+            f"Available: {avail}",
+        )
+    reso_registry.set_method(method)
+    return {"method": method, "available": avail}
 
 
 @router.post("/inject-observed")
