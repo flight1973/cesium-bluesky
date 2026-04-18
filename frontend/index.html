@@ -181,6 +181,14 @@
     }
     conflicts-panel[hidden] { display: none; }
 
+    /* Formations panel — below conflicts */
+    formations-panel {
+      position: absolute;
+      top: 320px; right: 268px;
+      z-index: 20;
+    }
+    formations-panel[hidden] { display: none; }
+
     /* Sidebar: traffic list */
     bluesky-traffic-list {
       grid-area: sidebar;
@@ -219,6 +227,7 @@
     <airport-panel hidden></airport-panel>
     <opacity-panel hidden></opacity-panel>
     <conflicts-panel hidden></conflicts-panel>
+    <formations-panel hidden></formations-panel>
     <scenario-editor hidden></scenario-editor>
     <bluesky-statusbar></bluesky-statusbar>
     <bluesky-console></bluesky-console>

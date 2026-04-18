@@ -66,6 +66,8 @@ import './ui/scale-bar';
 import './ui/compass-ring';
 import './ui/layer-panel';
 import './ui/measure-tool';
+import './ui/formations-panel';
+import { FormationManager as FormationMapManager } from './cesium/entities/formations';
 import './ui/settings-panel';
 import './ui/weather-time-strip';
 import './ui/replay-panel';
@@ -114,6 +116,7 @@ const wxImageryMgr = new WeatherImageryManager(viewer);
 const airspaceMgr = new AirspaceManager(viewer);
 const procedureMgr = new ProcedureManager(viewer);
 const pirepMgr = new PirepManager(viewer);
+const formationMgr = new FormationMapManager(viewer);
 const observedMgr = new ObservedTrafficManager(viewer, 'live');
 const replayMgr = new ObservedTrafficManager(viewer, 'replay');
 replayMgr.setLerpMode(true, 500);
@@ -939,6 +942,7 @@ replayController.onData((data: any) => {
     data.lospairs || [],
   );
   replayMgr.updateAdvisories(data.advisories || {});
+  formationMgr.update(data.items || []);
   if (conflictsPanel) {
     conflictsPanel.update_conflicts(
       data.confpairs || [],
@@ -1037,6 +1041,7 @@ async function fetchLiveTraffic(): Promise<void> {
       data.lospairs || [],
     );
     observedMgr.updateAdvisories(data.advisories || {});
+    formationMgr.update(data.items || []);
     if (conflictsPanel) {
       conflictsPanel.update_conflicts(
         data.confpairs || [],
@@ -1070,6 +1075,10 @@ function scheduleLiveFetch(): void {
 // When the user picks a new resolution method in the
 // conflicts panel, refresh both live and replay data
 // so the new advisories show immediately.
+document.addEventListener('formations-updated', ((e: CustomEvent) => {
+  formationMgr.setFormations(e.detail.formations || []);
+}) as EventListener);
+
 document.addEventListener('reso-method-changed', () => {
   if (observedMgr.visible) fetchLiveTraffic();
   // Force a replay refresh by re-seeking to current time
@@ -1712,6 +1721,17 @@ document.addEventListener(
         observedMgr.setAdvisoriesVisible(visible);
         replayMgr.setAdvisoriesVisible(visible);
         break;
+      case 'formations': {
+        formationMgr.setVisible(visible);
+        const fp = document.querySelector('formations-panel') as any;
+        if (fp) fp.hidden = !visible;
+        if (visible) {
+          fetch('/api/formations').then(r => r.json())
+            .then(d => formationMgr.setFormations(d.formations || []))
+            .catch(() => {});
+        }
+        break;
+      }
       case 'pz':
         aircraftMgr.setPzVisible(visible);
         observedMgr.setPzVisible(visible);
