@@ -1,4 +1,4 @@
-import { LitElement, html, css } from 'lit';
+import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 import {
   replayController,
@@ -11,6 +11,10 @@ export class ReplayPanel extends LitElement {
   @state() private sessions: ReplaySession[] = [];
   @state() private rs: ReplayState = replayController.state;
   @state() private loading = false;
+  @state() private _exportOpen = false;
+  @state() private _exportName = '';
+  @state() private _exporting = false;
+  @state() private _exportResult = '';
 
   static styles = css`
     :host {
@@ -135,6 +139,21 @@ export class ReplayPanel extends LitElement {
       font-size: 10px;
       margin-top: 4px;
     }
+
+    .export-form {
+      margin-top: 4px;
+      padding: 6px;
+      background: #0a0a0a;
+      border: 1px solid #222;
+      border-radius: 3px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .export-form label {
+      color: #888;
+      font-size: 10px;
+    }
   `;
 
   connectedCallback(): void {
@@ -253,7 +272,107 @@ export class ReplayPanel extends LitElement {
           </button>
         `)}
       </div>
+
+      <div class="row" style="margin-top:6px; gap:4px">
+        <button @click=${this._toggleExport}
+          title="Compile visible window into a BlueSky .scn file"
+        >${this._exportOpen ? '\u25BC' : '\u25B6'} EXPORT .SCN</button>
+      </div>
+
+      ${this._exportOpen ? this._renderExportForm() : nothing}
     `;
+  }
+
+  private _renderExportForm() {
+    const s = this.rs;
+    return html`
+      <div class="export-form">
+        <div class="row" style="gap:4px">
+          <label>Name:</label>
+          <input id="scn-name" type="text"
+            .value=${this._exportName}
+            @input=${(e: Event) => {
+              this._exportName = (e.target as HTMLInputElement).value;
+            }}
+            placeholder="dfw-replay"
+            style="flex:1; background:#111; color:#0f0;
+                   border:1px solid #333; padding:2px 4px;
+                   font-family:inherit; font-size:11px"
+          />
+        </div>
+        <div class="row" style="gap:4px; font-size:10px; color:#888">
+          <span>From: ${this._fmtTime(s.minEpoch)}</span>
+          <span>To: ${this._fmtTime(s.currentEpoch)}</span>
+        </div>
+        <div class="row" style="gap:4px">
+          <button @click=${this._doExport}
+            ?disabled=${this._exporting || !this._exportName}>
+            ${this._exporting ? 'Writing...' : 'Write .SCN'}
+          </button>
+          <button @click=${this._exportFullRange}
+            ?disabled=${this._exporting || !this._exportName}>
+            Full range
+          </button>
+        </div>
+        ${this._exportResult ? html`
+          <div style="color:${this._exportResult.startsWith('Error')
+                                 ? '#f66' : '#0f0'};
+                      font-size:10px; margin-top:2px">
+            ${this._exportResult}
+          </div>
+        ` : nothing}
+      </div>
+    `;
+  }
+
+  private _toggleExport(): void {
+    this._exportOpen = !this._exportOpen;
+    if (this._exportOpen && !this._exportName) {
+      const label = this.rs.session?.label || 'replay';
+      const ts = this._fmtTime(this.rs.currentEpoch).replace(/:/g, '');
+      this._exportName = `${label}-${ts}`;
+    }
+  }
+
+  private async _doExport(
+    startEpoch?: number,
+    stopEpoch?: number,
+  ): Promise<void> {
+    if (!this.rs.session || this._exporting) return;
+    this._exporting = true;
+    this._exportResult = '';
+    const label = this.rs.session.label;
+
+    // Default window: session start to current scrubber position
+    const start = startEpoch ?? this.rs.minEpoch;
+    const stop = stopEpoch ?? Math.round(this.rs.currentEpoch);
+
+    const params = new URLSearchParams({
+      name: this._exportName,
+      start_epoch: String(start),
+      stop_epoch: String(stop),
+    });
+    try {
+      const res = await fetch(
+        `/api/surveillance/replay/${label}/to-scenario?${params}`,
+        { method: 'POST' },
+      );
+      if (!res.ok) {
+        const txt = await res.text();
+        this._exportResult = `Error: ${txt.slice(0, 100)}`;
+      } else {
+        const data = await res.json();
+        this._exportResult =
+          `Wrote ${data.filename} — ${data.aircraft} aircraft, ${data.commands} commands`;
+      }
+    } catch (e: any) {
+      this._exportResult = `Error: ${e.message}`;
+    }
+    this._exporting = false;
+  }
+
+  private _exportFullRange(): void {
+    this._doExport(this.rs.minEpoch, this.rs.maxEpoch);
   }
 
   private _fmtTime(epoch: number): string {

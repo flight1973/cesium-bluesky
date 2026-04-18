@@ -210,6 +210,41 @@ async def download_trino(
     }
 
 
+@router.post("/replay/{label}/to-scenario")
+async def replay_to_scenario(
+    label: str,
+    name: str = Query(..., description="Output scenario filename (no extension needed)"),
+    start_epoch: int | None = Query(None, description="Start time (epoch seconds)"),
+    stop_epoch: int | None = Query(None, description="Stop time (epoch seconds)"),
+) -> dict:
+    """Compile a replay session window into a BlueSky .scn file.
+
+    The file is written into the user scenario directory so it
+    appears in the scenario dropdown and can be loaded with IC.
+    """
+    from cesium_app.surveillance import replay_to_scenario as r2s
+    from cesium_app.api.scenario import _user_scenario_dir, _safe_filename
+
+    safe = _safe_filename(name)
+    if not safe.lower().endswith('.scn'):
+        safe = safe + '.scn'
+    out = _user_scenario_dir() / safe
+
+    try:
+        stats = await asyncio.to_thread(
+            r2s.convert,
+            label, start_epoch, stop_epoch, str(out),
+        )
+    except Exception as exc:
+        raise HTTPException(500, f"Conversion failed: {exc}") from exc
+
+    return {
+        "filename": safe,
+        "path": str(out),
+        **stats,
+    }
+
+
 # ── Conflict detection mode ───────────────────────────
 
 
