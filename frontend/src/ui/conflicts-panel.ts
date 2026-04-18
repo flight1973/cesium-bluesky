@@ -23,10 +23,24 @@ interface ConflictEntry {
   isLos: boolean; // true = active LOS, false = predicted
 }
 
+const RESO_METHODS = [
+  { id: 'mvp',          label: 'MVP' },
+  { id: 'ssd',          label: 'SSD' },
+  { id: 'eby',          label: 'Eby' },
+  { id: 'swarm',        label: 'Swarm' },
+  { id: 'vo',           label: 'VO' },
+  { id: 'orca',         label: 'ORCA' },
+  { id: 'dubins',       label: 'Dubins' },
+  { id: 'apf',          label: 'APF' },
+  { id: 'boids',        label: 'Boids' },
+  { id: 'social_force', label: 'Social Force' },
+];
+
 @customElement('conflicts-panel')
 export class ConflictsPanel extends LitElement {
   @state() private conflicts: ConflictEntry[] = [];
   @state() private expanded = false;
+  @state() private resoMethod = 'mvp';
 
   static styles = css`
     :host {
@@ -118,6 +132,30 @@ export class ConflictsPanel extends LitElement {
       font-size: 9px;
       border-bottom: 1px solid #222;
     }
+    .reso-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-bottom: 1px solid #222;
+      background: #0a0a0a;
+    }
+    .reso-row label {
+      font-size: 10px;
+      color: #888;
+    }
+    .reso-row select {
+      flex: 1;
+      background: #1a1a1a;
+      color: #00ff00;
+      border: 1px solid #333;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 10px;
+      padding: 2px 4px;
+      cursor: pointer;
+    }
+    .reso-row select:focus { outline: 1px solid #00aa00; }
   `;
 
   /**
@@ -165,23 +203,71 @@ export class ConflictsPanel extends LitElement {
   }
 
   private _renderList() {
-    if (!this.conflicts.length) {
-      return html`<div class="empty">
-        No active conflicts
-      </div>`;
-    }
     return html`
-      <div class="col-hdr">
-        <span>AC 1</span>
-        <span>AC 2</span>
-        <span>TCPA</span>
-        <span>DCPA</span>
-        <span></span>
+      <div class="reso-row">
+        <label>Method:</label>
+        <select .value=${this.resoMethod}
+          @change=${this._onMethodChange}>
+          ${RESO_METHODS.map(m => html`
+            <option value=${m.id}
+              ?selected=${m.id === this.resoMethod}>
+              ${m.label}
+            </option>
+          `)}
+        </select>
       </div>
-      <div class="list">
-        ${this.conflicts.map((c) => this._renderRow(c))}
-      </div>
+      ${!this.conflicts.length ? html`
+        <div class="empty">No active conflicts</div>
+      ` : html`
+        <div class="col-hdr">
+          <span>AC 1</span>
+          <span>AC 2</span>
+          <span>TCPA</span>
+          <span>DCPA</span>
+          <span></span>
+        </div>
+        <div class="list">
+          ${this.conflicts.map((c) => this._renderRow(c))}
+        </div>
+      `}
     `;
+  }
+
+  private async _onMethodChange(e: Event): Promise<void> {
+    const method = (e.target as HTMLSelectElement).value;
+    this.resoMethod = method;
+    try {
+      await fetch(
+        `/api/surveillance/reso-method?method=${method}`,
+        { method: 'POST' },
+      );
+      // Notify main.ts to refetch traffic so the
+      // new advisories appear immediately.
+      this.dispatchEvent(new CustomEvent('reso-method-changed', {
+        detail: { method },
+        bubbles: true, composed: true,
+      }));
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  async loadCurrentMethod(): Promise<void> {
+    try {
+      const res = await fetch(
+        '/api/surveillance/reso-method',
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.method) this.resoMethod = data.method;
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  connectedCallback(): void {
+    super.connectedCallback();
+    this.loadCurrentMethod();
   }
 
   private _renderRow(c: ConflictEntry) {

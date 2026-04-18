@@ -1067,6 +1067,17 @@ function scheduleLiveFetch(): void {
   );
 }
 
+// When the user picks a new resolution method in the
+// conflicts panel, refresh both live and replay data
+// so the new advisories show immediately.
+document.addEventListener('reso-method-changed', () => {
+  if (observedMgr.visible) fetchLiveTraffic();
+  // Force a replay refresh by re-seeking to current time
+  if (replayController.state.active) {
+    replayController.seek(replayController.state.currentEpoch);
+  }
+});
+
 // Refresh every 15 seconds while visible.
 setInterval(() => {
   if (observedMgr.visible) fetchLiveTraffic();

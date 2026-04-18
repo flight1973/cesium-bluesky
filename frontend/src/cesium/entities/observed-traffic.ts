@@ -482,8 +482,7 @@ export class ObservedTrafficManager {
       if (existing) {
         existing.polyline!.positions =
           new ConstantProperty([position, vvEnd]);
-        existing.polyline!.material =
-          new ConstantProperty(color) as any;
+        existing.polyline!.material = color as any;
       } else {
         const arrow = this.source.entities.add({
           show: this._advisoriesVisible,
