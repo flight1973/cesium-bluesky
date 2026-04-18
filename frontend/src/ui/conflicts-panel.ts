@@ -36,11 +36,18 @@ const RESO_METHODS = [
   { id: 'social_force', label: 'Social Force' },
 ];
 
+const CD_MODES = [
+  { id: 'standalone', label: 'Standalone', tip: 'Our CD only — airspace-aware, no sim integration' },
+  { id: 'asas',       label: 'ASAS',       tip: 'BlueSky ASAS (requires aircraft in bs.traf)' },
+  { id: 'hybrid',     label: 'Hybrid',     tip: 'Both, merged — sim + observed traffic' },
+];
+
 @customElement('conflicts-panel')
 export class ConflictsPanel extends LitElement {
   @state() private conflicts: ConflictEntry[] = [];
   @state() private expanded = false;
   @state() private resoMethod = 'mvp';
+  @state() private cdMode = 'standalone';
 
   static styles = css`
     :host {
@@ -205,6 +212,18 @@ export class ConflictsPanel extends LitElement {
   private _renderList() {
     return html`
       <div class="reso-row">
+        <label>CD Mode:</label>
+        <select .value=${this.cdMode}
+          @change=${this._onCdModeChange}>
+          ${CD_MODES.map(m => html`
+            <option value=${m.id} title=${m.tip}
+              ?selected=${m.id === this.cdMode}>
+              ${m.label}
+            </option>
+          `)}
+        </select>
+      </div>
+      <div class="reso-row">
         <label>Method:</label>
         <select .value=${this.resoMethod}
           @change=${this._onMethodChange}>
@@ -265,9 +284,40 @@ export class ConflictsPanel extends LitElement {
     }
   }
 
+  async loadCurrentCdMode(): Promise<void> {
+    try {
+      const res = await fetch('/api/surveillance/cd-mode');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.mode) this.cdMode = data.mode;
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  private async _onCdModeChange(e: Event): Promise<void> {
+    const mode = (e.target as HTMLSelectElement).value;
+    this.cdMode = mode;
+    try {
+      await fetch(
+        `/api/surveillance/cd-mode?mode=${mode}`,
+        { method: 'POST' },
+      );
+      // Trigger a refetch so the new mode's conflicts
+      // appear on the map immediately.
+      this.dispatchEvent(new CustomEvent('reso-method-changed', {
+        detail: { mode },
+        bubbles: true, composed: true,
+      }));
+    } catch {
+      // Non-fatal.
+    }
+  }
+
   connectedCallback(): void {
     super.connectedCallback();
     this.loadCurrentMethod();
+    this.loadCurrentCdMode();
   }
 
   private _renderRow(c: ConflictEntry) {

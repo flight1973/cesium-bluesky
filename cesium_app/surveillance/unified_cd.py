@@ -134,7 +134,9 @@ def detect(
     standalone = standalone_detect(items)
     asas = get_asas_conflicts()
     merged = _merge(standalone, asas)
-    merged['advisories'] = resolve_all(items, merged)
+    raw_advs = reso_registry.resolve(items, merged)
+    merged['advisories'] = apply_row(items, merged, raw_advs)
+    merged['reso_method'] = reso_registry.get_method()
     return merged
 
 
