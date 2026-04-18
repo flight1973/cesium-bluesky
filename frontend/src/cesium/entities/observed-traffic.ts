@@ -146,6 +146,10 @@ export class ObservedTrafficManager {
   private _trails = new Map<string, Cartesian3[]>();
   private _trailEntities = new Map<string, Entity>();
 
+  /** Resolution advisory vectors per aircraft. */
+  private _advisories = new Map<string, Entity>();
+  private _advisoriesVisible = true;
+
   /** Dead-reckoning state per aircraft. */
   private _dr = new Map<string, DrState>();
   private _drTimer: number | null = null;
@@ -409,6 +413,105 @@ export class ObservedTrafficManager {
     for (const e of this._leaders.values()) {
       e.show = on;
     }
+  }
+
+  setAdvisoriesVisible(on: boolean): void {
+    this._advisoriesVisible = on;
+    for (const e of this._advisories.values()) {
+      e.show = on;
+    }
+  }
+
+  updateAdvisories(
+    advisories: Record<string, {
+      new_hdg: number;
+      new_spd_kt: number;
+      dhdg_deg: number;
+      dspd_kt: number;
+      row_status?: string;
+    }>,
+  ): void {
+    const seen = new Set<string>();
+    for (const [callsign, adv] of Object.entries(advisories)) {
+      // Find the aircraft by callsign. Observed traffic
+      // stores entity names as "{prefix}-{icao24}".
+      let ac: ObservedAircraft | undefined;
+      for (const a of this._last) {
+        if ((a.callsign || '').trim() === callsign
+            || a.icao24 === callsign.toLowerCase()) {
+          ac = a;
+          break;
+        }
+      }
+      if (!ac) continue;
+      seen.add(ac.icao24);
+
+      const altScaled = (ac.alt_m || 0) * this._altScale;
+      const position = Cartesian3.fromDegrees(
+        ac.lon, ac.lat, altScaled,
+      );
+
+      // Advisory vector: 60 seconds at the recommended speed
+      const hdgRad = adv.new_hdg * Math.PI / 180;
+      const gs_ms = adv.new_spd_kt * 0.514444;
+      const vvEnd = velocityEndpoint(
+        position, hdgRad, gs_ms * VV_SECONDS,
+      );
+
+      // Color by row_status — informative of the
+      // suggested maneuver's reason:
+      //   safety_override → red  (imminent LoS, full maneuver)
+      //   give_way        → green (normal 91.113 give-way)
+      //   right_of_way    → yellow (reduced "safety" adjustment)
+      //   head_on_shared  → cyan  (both turning right)
+      //   default         → green
+      let color: Color;
+      switch (adv.row_status) {
+        case 'safety_override':
+          color = new Color(1.0, 0.2, 0.2, 0.9); break;
+        case 'right_of_way':
+          color = new Color(1.0, 0.9, 0.2, 0.85); break;
+        case 'head_on_shared':
+          color = new Color(0.3, 0.9, 1.0, 0.9); break;
+        case 'give_way':
+        default:
+          color = new Color(0.3, 1.0, 0.3, 0.9); break;
+      }
+
+      const existing = this._advisories.get(ac.icao24);
+      if (existing) {
+        existing.polyline!.positions =
+          new ConstantProperty([position, vvEnd]);
+        existing.polyline!.material =
+          new ConstantProperty(color) as any;
+      } else {
+        const arrow = this.source.entities.add({
+          show: this._advisoriesVisible,
+          polyline: {
+            positions: [position, vvEnd],
+            width: 3,
+            material: color,
+            clampToGround: false,
+          },
+        });
+        this._advisories.set(ac.icao24, arrow);
+      }
+    }
+
+    // Remove advisories for aircraft no longer in conflict.
+    for (const [icao, ent] of this._advisories) {
+      if (!seen.has(icao)) {
+        this.source.entities.remove(ent);
+        this._advisories.delete(icao);
+      }
+    }
+  }
+
+  clearAdvisories(): void {
+    for (const ent of this._advisories.values()) {
+      this.source.entities.remove(ent);
+    }
+    this._advisories.clear();
   }
 
   setTrailsVisible(on: boolean): void {

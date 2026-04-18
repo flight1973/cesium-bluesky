@@ -938,6 +938,7 @@ replayController.onData((data: any) => {
     data.confpairs || [],
     data.lospairs || [],
   );
+  replayMgr.updateAdvisories(data.advisories || {});
   if (conflictsPanel) {
     conflictsPanel.update_conflicts(
       data.confpairs || [],
@@ -1035,6 +1036,7 @@ async function fetchLiveTraffic(): Promise<void> {
       data.confpairs || [],
       data.lospairs || [],
     );
+    observedMgr.updateAdvisories(data.advisories || {});
     if (conflictsPanel) {
       conflictsPanel.update_conflicts(
         data.confpairs || [],
@@ -1694,6 +1696,10 @@ document.addEventListener(
         aircraftMgr.setLeadersVisible(visible);
         observedMgr.setLeadersVisible(visible);
         replayMgr.setLeadersVisible(visible);
+        break;
+      case 'advisories':
+        observedMgr.setAdvisoriesVisible(visible);
+        replayMgr.setAdvisoriesVisible(visible);
         break;
       case 'pz':
         aircraftMgr.setPzVisible(visible);

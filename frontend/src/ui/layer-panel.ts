@@ -22,6 +22,7 @@ const LAYER_TREE: LayerGroup[] = [
       { id: 'interpolation', label: 'Interpolation', defaultOn: true },
       { id: 'trails', label: 'Trails', defaultOn: false },
       { id: 'leaders', label: 'Velocity Vectors', defaultOn: true },
+      { id: 'advisories', label: 'Resolution Advisories', defaultOn: true },
       { id: 'pz', label: 'Protected Zones', defaultOn: false },
       { id: 'labels', label: 'Labels', defaultOn: true },
       { id: 'routes', label: 'Routes', defaultOn: true },
