@@ -161,14 +161,111 @@ def detect_conflicts(
                 conf_dcpa.append(
                     round(dcpa_m / NM_TO_M, 2))
 
+    wake_pairs = _detect_wake_violations(airborne)
+
     return {
         "confpairs": confpairs,
         "lospairs": lospairs,
         "conf_tcpa": conf_tcpa,
         "conf_dcpa": conf_dcpa,
+        "wakepairs": wake_pairs,
         "nconf_cur": len(confpairs),
         "nlos_cur": len(lospairs),
+        "nwake_cur": len(wake_pairs),
     }
+
+
+def _detect_wake_violations(
+    items: list[dict],
+) -> list[dict]:
+    """Flag aircraft pairs violating wake separation.
+
+    Runs after geometric CD. Augments the conflict set with
+    wake-specific hazards (following too close behind a heavy,
+    flying below/through a helicopter's rotor wash zone, etc.)
+    that geometric CD alone might miss.
+    """
+    try:
+        from cesium_app.cooperative.wake_model import (
+            should_apply_wake_separation,
+            rotorcraft_wake_separation_nm,
+            minimum_separation_by_type,
+            is_rotorcraft,
+        )
+        from cesium_app.performance.openap_adapter import (
+            get_aircraft_props,
+        )
+    except ImportError:
+        return []
+
+    # Emit all wake violations — even if the pair is
+    # already flagged by geometric CD, the wake
+    # categorization adds useful context.
+    wake_pairs: list[dict] = []
+
+    for i in range(len(items)):
+        a = items[i]
+        if a.get('on_ground', False):
+            continue
+        a_type = a.get('typecode', '') or ''
+
+        for j in range(len(items)):
+            if i == j:
+                continue
+            b = items[j]
+            if b.get('on_ground', False):
+                continue
+
+            if not should_apply_wake_separation(a, b):
+                continue
+
+            a_mtow = a.get('mtow_kg', 0) or 0
+            b_mtow = b.get('mtow_kg', 0) or 0
+            if a_mtow == 0 or b_mtow == 0:
+                try:
+                    if a_mtow == 0:
+                        a_mtow = get_aircraft_props(a_type).get('mtow_kg', 70000)
+                    if b_mtow == 0:
+                        b_mtow = get_aircraft_props(
+                            b.get('typecode', '') or ''
+                        ).get('mtow_kg', 70000)
+                except Exception:
+                    continue
+
+            if is_rotorcraft(a_type):
+                min_nm = rotorcraft_wake_separation_nm(
+                    a_type, a.get('gs_kt', 0) or 0,
+                    a_mtow, b_mtow,
+                )
+                category = 'rotorcraft_wake'
+            else:
+                min_nm, lead_cat, trail_cat = minimum_separation_by_type(
+                    a_mtow, b_mtow,
+                )
+                category = f'recat_{lead_cat.value}_{trail_cat.value}'
+                if min_nm <= 0:
+                    continue
+
+            dy_m = (b.get('lat', 0) - a.get('lat', 0)) * DEG_TO_M_LAT
+            dx_m = (b.get('lon', 0) - a.get('lon', 0)) * DEG_TO_M_LAT \
+                * math.cos(a.get('lat', 0) * math.pi / 180)
+            dist_nm = math.sqrt(dx_m * dx_m + dy_m * dy_m) / NM_TO_M
+
+            if dist_nm >= min_nm:
+                continue
+
+            id1 = a.get('callsign') or a.get('icao24', '?')
+            id2 = b.get('callsign') or b.get('icao24', '?')
+
+            wake_pairs.append({
+                "lead": id1,
+                "trail": id2,
+                "distance_nm": round(dist_nm, 2),
+                "required_nm": round(min_nm, 2),
+                "category": category,
+            })
+
+    return wake_pairs
 
 
 def _empty() -> dict:
