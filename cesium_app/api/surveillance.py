@@ -302,6 +302,31 @@ async def set_reso_method(
     return {"method": method, "available": avail}
 
 
+@router.get("/iterative")
+async def get_iterative() -> dict:
+    """Whether iterative resolution is enabled."""
+    return {"enabled": unified_cd.get_iterative()}
+
+
+@router.post("/iterative")
+async def set_iterative(
+    enabled: bool = Query(
+        ...,
+        description="Turn iterative resolution on/off.",
+    ),
+) -> dict:
+    """Enable/disable iterative conflict resolution.
+
+    When on, the resolver re-runs CD on the projected
+    post-advisory state and issues additional advisories
+    to clear secondary conflicts (up to 5 iterations).
+    Slower (~2–5x) but dramatically reduces residual
+    conflicts in dense traffic.
+    """
+    unified_cd.set_iterative(enabled)
+    return {"enabled": enabled}
+
+
 @router.post("/inject-observed")
 async def inject_observed(
     enabled: bool = Query(True),

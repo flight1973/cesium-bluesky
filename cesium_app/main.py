@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from cesium_app.api import adsb as adsb_api
 from cesium_app.api import airspace as airspace_api
 from cesium_app.api import areas
 from cesium_app.api import cache as cache_api
@@ -127,6 +128,7 @@ app.include_router(pan_api.router)
 app.include_router(docs_api.router)
 app.include_router(perf_api.router)
 app.include_router(formations_api.router)
+app.include_router(adsb_api.router)
 app.include_router(ws_streams.router)
 
 

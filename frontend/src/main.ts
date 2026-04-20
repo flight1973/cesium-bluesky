@@ -67,6 +67,7 @@ import './ui/compass-ring';
 import './ui/layer-panel';
 import './ui/measure-tool';
 import './ui/formations-panel';
+import './ui/adsb-panel';
 import { FormationManager as FormationMapManager } from './cesium/entities/formations';
 import './ui/settings-panel';
 import './ui/weather-time-strip';
@@ -942,6 +943,7 @@ replayController.onData((data: any) => {
     data.lospairs || [],
   );
   replayMgr.updateAdvisories(data.advisories || {});
+  replayMgr.updateWakeViolations(data.wakepairs || []);
   formationMgr.update(data.items || []);
   if (conflictsPanel) {
     conflictsPanel.update_conflicts(
@@ -950,6 +952,8 @@ replayController.onData((data: any) => {
       data.conf_tcpa || [],
       data.conf_dcpa || [],
     );
+    conflictsPanel.update_wake(data.wakepairs || []);
+    conflictsPanel.update_iter_stats(data.iterative_stats);
   }
   statusBar.updateConflicts(
     data.nconf_cur || 0,
@@ -1041,6 +1045,7 @@ async function fetchLiveTraffic(): Promise<void> {
       data.lospairs || [],
     );
     observedMgr.updateAdvisories(data.advisories || {});
+    observedMgr.updateWakeViolations(data.wakepairs || []);
     formationMgr.update(data.items || []);
     if (conflictsPanel) {
       conflictsPanel.update_conflicts(
@@ -1049,6 +1054,8 @@ async function fetchLiveTraffic(): Promise<void> {
         data.conf_tcpa || [],
         data.conf_dcpa || [],
       );
+      conflictsPanel.update_wake(data.wakepairs || []);
+      conflictsPanel.update_iter_stats(data.iterative_stats);
     }
     statusBar.updateConflicts(
       data.nconf_cur || 0,
@@ -1558,8 +1565,10 @@ handler.setInputAction(
         const nowOn = observedMgr.toggleTrailForAircraft(icao);
         const info = observedMgr.getAircraftInfo(icao);
         const cs = info?.callsign || icao;
+        const cls = info?.airspace_class
+          ? ` Class ${info.airspace_class}` : '';
         cmdConsole.echo(
-          `[LIVE] ${cs} ${info?.typecode || ''} ${info?.registration || ''} — trail ${nowOn ? 'ON' : 'OFF'}`,
+          `[LIVE] ${cs} ${info?.typecode || ''} ${info?.registration || ''}${cls} — trail ${nowOn ? 'ON' : 'OFF'}`,
         );
         return;
       }
@@ -1569,8 +1578,10 @@ handler.setInputAction(
         const nowOn = replayMgr.toggleTrailForAircraft(icao);
         const info = replayMgr.getAircraftInfo(icao);
         const cs = info?.callsign || icao;
+        const cls = info?.airspace_class
+          ? ` Class ${info.airspace_class}` : '';
         cmdConsole.echo(
-          `[REPLAY] ${cs} ${info?.typecode || ''} ${info?.registration || ''} — trail ${nowOn ? 'ON' : 'OFF'}`,
+          `[REPLAY] ${cs} ${info?.typecode || ''} ${info?.registration || ''}${cls} — trail ${nowOn ? 'ON' : 'OFF'}`,
         );
         return;
       }
@@ -1717,6 +1728,10 @@ document.addEventListener(
         observedMgr.setLeadersVisible(visible);
         replayMgr.setLeadersVisible(visible);
         break;
+      case 'wake':
+        observedMgr.setWakeVisible(visible);
+        replayMgr.setWakeVisible(visible);
+        break;
       case 'advisories':
         observedMgr.setAdvisoriesVisible(visible);
         replayMgr.setAdvisoriesVisible(visible);
@@ -1730,6 +1745,11 @@ document.addEventListener(
             .then(d => formationMgr.setFormations(d.formations || []))
             .catch(() => {});
         }
+        break;
+      }
+      case 'adsb-local': {
+        const ap = document.querySelector('adsb-panel') as any;
+        if (ap) ap.hidden = !visible;
         break;
       }
       case 'pz':

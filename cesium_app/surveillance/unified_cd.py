@@ -30,15 +30,20 @@ import bluesky as bs
 
 from cesium_app.surveillance.conflict_detect import (
     detect_conflicts as standalone_detect,
+    _detect_wake_violations,
 )
 from cesium_app.surveillance import resolution as reso_registry
 from cesium_app.surveillance.right_of_way import apply_row
+from cesium_app.surveillance.iterative_resolution import (
+    resolve_iterative,
+)
 
 logger = logging.getLogger(__name__)
 
 CdMode = Literal['asas', 'standalone', 'hybrid']
 
 _current_mode: CdMode = 'standalone'
+_iterative_enabled: bool = False
 
 
 def set_mode(mode: CdMode) -> None:
@@ -49,6 +54,17 @@ def set_mode(mode: CdMode) -> None:
 
 def get_mode() -> CdMode:
     return _current_mode
+
+
+def set_iterative(enabled: bool) -> None:
+    global _iterative_enabled
+    _iterative_enabled = enabled
+    logger.info("Iterative resolution: %s",
+                "on" if enabled else "off")
+
+
+def get_iterative() -> bool:
+    return _iterative_enabled
 
 
 def get_asas_conflicts() -> dict:
@@ -119,13 +135,26 @@ def detect(
     m = mode or _current_mode
 
     if m == 'asas':
-        return get_asas_conflicts()
+        result = get_asas_conflicts()
+        # ASAS doesn't model RECAT-EU wake separation.
+        # Compute it ourselves from the observed items so
+        # the UI always gets wake violations.
+        result['wakepairs'] = _detect_wake_violations(items)
+        result['nwake_cur'] = len(result['wakepairs'])
+        return result
 
     if m == 'standalone':
         result = standalone_detect(items)
         result['source'] = 'standalone'
-        raw_advs = reso_registry.resolve(items, result)
-        result['advisories'] = apply_row(items, result, raw_advs)
+        if _iterative_enabled:
+            advs, stats = resolve_iterative(items, result)
+            result['advisories'] = advs
+            result['iterative_stats'] = stats
+        else:
+            raw_advs = reso_registry.resolve(items, result)
+            result['advisories'] = apply_row(
+                items, result, raw_advs,
+            )
         result['reso_method'] = reso_registry.get_method()
         return result
 
@@ -134,8 +163,15 @@ def detect(
     standalone = standalone_detect(items)
     asas = get_asas_conflicts()
     merged = _merge(standalone, asas)
-    raw_advs = reso_registry.resolve(items, merged)
-    merged['advisories'] = apply_row(items, merged, raw_advs)
+    if _iterative_enabled:
+        advs, stats = resolve_iterative(items, merged)
+        merged['advisories'] = advs
+        merged['iterative_stats'] = stats
+    else:
+        raw_advs = reso_registry.resolve(items, merged)
+        merged['advisories'] = apply_row(
+            items, merged, raw_advs,
+        )
     merged['reso_method'] = reso_registry.get_method()
     return merged
 
@@ -170,13 +206,20 @@ def _merge(a: dict, b: dict) -> dict:
                 los_seen.add(key)
                 lospairs.append(pair)
 
+    # Preserve wakepairs from whichever source computed
+    # them (only standalone_detect emits wake violations;
+    # ASAS doesn't model RECAT-EU wake separation).
+    wakepairs = a.get('wakepairs') or b.get('wakepairs') or []
+
     return {
         "confpairs": confpairs,
         "lospairs": lospairs,
         "conf_tcpa": conf_tcpa,
         "conf_dcpa": conf_dcpa,
+        "wakepairs": wakepairs,
         "nconf_cur": len(confpairs),
         "nlos_cur": len(lospairs),
+        "nwake_cur": len(wakepairs),
         "source": "hybrid",
     }
 

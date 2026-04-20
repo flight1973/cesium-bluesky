@@ -189,6 +189,14 @@
     }
     formations-panel[hidden] { display: none; }
 
+    /* ADS-B config panel — overlays below formations */
+    adsb-panel {
+      position: absolute;
+      top: 460px; right: 268px;
+      z-index: 20;
+    }
+    adsb-panel[hidden] { display: none; }
+
     /* Sidebar: traffic list */
     bluesky-traffic-list {
       grid-area: sidebar;
@@ -228,6 +236,7 @@
     <opacity-panel hidden></opacity-panel>
     <conflicts-panel hidden></conflicts-panel>
     <formations-panel hidden></formations-panel>
+    <adsb-panel hidden></adsb-panel>
     <scenario-editor hidden></scenario-editor>
     <bluesky-statusbar></bluesky-statusbar>
     <bluesky-console></bluesky-console>

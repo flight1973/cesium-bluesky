@@ -25,6 +25,7 @@ import {
   LabelStyle,
   ConstantProperty,
   ConstantPositionProperty,
+  PolylineDashMaterialProperty,
 } from 'cesium';
 
 export interface ObservedAircraft {
@@ -46,6 +47,7 @@ export interface ObservedAircraft {
   model?: string;         // Full model name
   operator?: string;      // Airline / operator name
   owner?: string;
+  airspace_class?: string; // B/C/D/E/G (3D point-in-poly)
 }
 
 const LIVE_COLOR = new Color(1.0, 0.75, 0.2, 0.85);    // amber
@@ -149,6 +151,10 @@ export class ObservedTrafficManager {
   /** Resolution advisory vectors per aircraft. */
   private _advisories = new Map<string, Entity>();
   private _advisoriesVisible = true;
+
+  /** Wake-violation polylines keyed by "lead|trail". */
+  private _wakeLines = new Map<string, Entity>();
+  private _wakeVisible = true;
 
   /** Dead-reckoning state per aircraft. */
   private _dr = new Map<string, DrState>();
@@ -734,6 +740,109 @@ export class ObservedTrafficManager {
     this._recolorPz();
   }
 
+  /** Orange dashed line + required/actual spacing label
+   *  for each wake-separation violation. */
+  updateWakeViolations(
+    wakepairs: {
+      lead: string;
+      trail: string;
+      distance_nm: number;
+      required_nm: number;
+      category: string;
+    }[],
+  ): void {
+    const seen = new Set<string>();
+    const findAc = (id: string): ObservedAircraft | undefined => {
+      for (const a of this._last) {
+        if ((a.callsign || '').trim() === id
+            || a.icao24 === id.toLowerCase()
+            || a.registration === id) {
+          return a;
+        }
+      }
+      return undefined;
+    };
+
+    for (const w of wakepairs) {
+      const lead = findAc(w.lead);
+      const trail = findAc(w.trail);
+      if (!lead || !trail) continue;
+      const key = `${w.lead}|${w.trail}`;
+      seen.add(key);
+
+      const p1 = Cartesian3.fromDegrees(
+        lead.lon, lead.lat, (lead.alt_m || 0) * this._altScale,
+      );
+      const p2 = Cartesian3.fromDegrees(
+        trail.lon, trail.lat, (trail.alt_m || 0) * this._altScale,
+      );
+      // Bright magenta for rotor wash (downwash hazard),
+      // amber for fixed-wing wake vortex.
+      const isRotor = w.category.startsWith('rotorcraft');
+      const color = isRotor
+        ? new Color(1.0, 0.2, 0.9, 0.95)
+        : new Color(1.0, 0.6, 0.0, 0.95);
+      const label = `${w.distance_nm.toFixed(1)}/${w.required_nm.toFixed(1)} NM`;
+
+      const existing = this._wakeLines.get(key);
+      if (existing) {
+        existing.polyline!.positions =
+          new ConstantProperty([p1, p2]);
+        existing.polyline!.material =
+          new PolylineDashMaterialProperty({
+            color, dashLength: 10,
+          }) as any;
+        (existing.position as any) = new ConstantPositionProperty(
+          Cartesian3.midpoint(p1, p2, new Cartesian3()),
+        );
+        existing.label!.text = new ConstantProperty(label);
+        existing.label!.fillColor = new ConstantProperty(color);
+      } else {
+        const mid = Cartesian3.midpoint(p1, p2, new Cartesian3());
+        const ent = this.source.entities.add({
+          show: this._wakeVisible,
+          position: mid,
+          polyline: {
+            positions: [p1, p2],
+            width: 3,
+            material: new PolylineDashMaterialProperty({
+              color, dashLength: 10,
+            }),
+            clampToGround: false,
+          },
+          label: {
+            text: label,
+            font: '10px Consolas, monospace',
+            fillColor: color,
+            outlineColor: Color.BLACK,
+            outlineWidth: 2,
+            style: LabelStyle.FILL_AND_OUTLINE,
+            horizontalOrigin: HorizontalOrigin.CENTER,
+            verticalOrigin: VerticalOrigin.CENTER,
+            showBackground: true,
+            backgroundColor: Color.BLACK.withAlpha(0.7),
+            backgroundPadding: new Cartesian2(4, 2),
+          },
+        });
+        this._wakeLines.set(key, ent);
+      }
+    }
+
+    for (const [key, ent] of this._wakeLines) {
+      if (!seen.has(key)) {
+        this.source.entities.remove(ent);
+        this._wakeLines.delete(key);
+      }
+    }
+  }
+
+  setWakeVisible(on: boolean): void {
+    this._wakeVisible = on;
+    for (const e of this._wakeLines.values()) {
+      e.show = on;
+    }
+  }
+
   private _recolorPz(): void {
     for (const [icao, pzEnt] of this._pzEntities) {
       const callsign = this._entities.get(icao)?.name
@@ -769,7 +878,10 @@ export class ObservedTrafficManager {
     // Line 1: callsign + type (e.g., "AAL3192 B738")
     const callsign = ac.callsign || ac.icao24.toUpperCase();
     const typeTag = ac.typecode ? ` ${ac.typecode}` : '';
-    const line1 = `${callsign}${typeTag}`;
+    const classTag =
+      ac.airspace_class && ac.airspace_class !== 'G'
+        ? ` [${ac.airspace_class}]` : '';
+    const line1 = `${callsign}${typeTag}${classTag}`;
     // Line 2: altitude + climb/descend arrow
     const altFt = ac.alt_ft;
     let altStr: string;

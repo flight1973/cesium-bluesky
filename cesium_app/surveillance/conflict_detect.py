@@ -274,6 +274,8 @@ def _empty() -> dict:
         "lospairs": [],
         "conf_tcpa": [],
         "conf_dcpa": [],
+        "wakepairs": [],
         "nconf_cur": 0,
         "nlos_cur": 0,
+        "nwake_cur": 0,
     }

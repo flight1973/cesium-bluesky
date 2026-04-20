@@ -23,6 +23,14 @@ interface ConflictEntry {
   isLos: boolean; // true = active LOS, false = predicted
 }
 
+interface WakeEntry {
+  lead: string;
+  trail: string;
+  distance_nm: number;
+  required_nm: number;
+  category: string;
+}
+
 const RESO_METHODS = [
   { id: 'mvp',          label: 'MVP' },
   { id: 'ssd',          label: 'SSD' },
@@ -45,9 +53,17 @@ const CD_MODES = [
 @customElement('conflicts-panel')
 export class ConflictsPanel extends LitElement {
   @state() private conflicts: ConflictEntry[] = [];
+  @state() private wake: WakeEntry[] = [];
   @state() private expanded = false;
   @state() private resoMethod = 'mvp';
   @state() private cdMode = 'standalone';
+  @state() private iterative = false;
+  @state() private iterStats: {
+    iterations?: number;
+    initial_conflicts?: number;
+    final_conflicts?: number;
+    converged?: boolean;
+  } | null = null;
 
   static styles = css`
     :host {
@@ -89,6 +105,38 @@ export class ConflictsPanel extends LitElement {
     .count.zero {
       background: #333;
       color: #888;
+    }
+    .count.wake {
+      background: #ff9100;
+      color: #000;
+      margin-left: 4px;
+    }
+    .wake-hdr {
+      padding: 3px 8px;
+      background: #2a1a00;
+      color: #ff9100;
+      font-size: 10px;
+      font-weight: bold;
+      border-top: 1px solid #333;
+      border-bottom: 1px solid #222;
+    }
+    .wake-row {
+      display: grid;
+      grid-template-columns: 70px 70px 90px 50px;
+      gap: 4px;
+      padding: 3px 8px;
+      border-bottom: 1px solid #181818;
+      font-size: 10px;
+      cursor: pointer;
+    }
+    .wake-row:hover { background: #1a0a00; }
+    .wake-row.rotor { border-left: 3px solid #ff33cc; }
+    .wake-row.fixed { border-left: 3px solid #ff9100; }
+    .wake-dist { color: #ff9100; }
+    .wake-cat {
+      text-align: right;
+      color: #888;
+      font-size: 9px;
     }
     .list {
       overflow-y: auto;
@@ -197,13 +245,38 @@ export class ConflictsPanel extends LitElement {
     this.conflicts = entries;
   }
 
+  update_wake(wakepairs: WakeEntry[]): void {
+    // Most-severe first (biggest deficit).
+    this.wake = [...wakepairs].sort((a, b) =>
+      (a.required_nm - a.distance_nm)
+      < (b.required_nm - b.distance_nm) ? 1 : -1,
+    );
+  }
+
+  update_iter_stats(stats: {
+    iterations?: number;
+    initial_conflicts?: number;
+    final_conflicts?: number;
+    converged?: boolean;
+  } | null | undefined): void {
+    this.iterStats = stats || null;
+  }
+
   render() {
     const n = this.conflicts.length;
+    const w = this.wake.length;
     return html`
       <div class="header"
            @click=${() => this.expanded = !this.expanded}>
         <span class="title">CONFLICTS</span>
-        <span class="count ${n === 0 ? 'zero' : ''}">${n}</span>
+        <span>
+          <span class="count ${n === 0 ? 'zero' : ''}">${n}</span>
+          ${w > 0 ? html`
+            <span class="count wake" title="Wake separation violations">
+              ${w}W
+            </span>
+          ` : nothing}
+        </span>
       </div>
       ${this.expanded ? this._renderList() : nothing}
     `;
@@ -235,6 +308,25 @@ export class ConflictsPanel extends LitElement {
           `)}
         </select>
       </div>
+      <div class="reso-row">
+        <label title="Re-run CD+resolution on post-advisory state until convergence">
+          Iterative:
+        </label>
+        <label style="flex:1;cursor:pointer">
+          <input type="checkbox" .checked=${this.iterative}
+            @change=${this._onIterativeChange} />
+          <span style="font-size:10px;color:#0f0">
+            ${this.iterative ? 'ON' : 'off'}
+          </span>
+          ${this.iterStats ? html`
+            <span style="color:#888;font-size:9px;margin-left:6px">
+              ${this.iterStats.initial_conflicts}→${this.iterStats.final_conflicts}
+              in ${this.iterStats.iterations}i
+              ${this.iterStats.converged ? '\u2713' : '\u25CB'}
+            </span>
+          ` : nothing}
+        </label>
+      </div>
       ${!this.conflicts.length ? html`
         <div class="empty">No active conflicts</div>
       ` : html`
@@ -249,7 +341,41 @@ export class ConflictsPanel extends LitElement {
           ${this.conflicts.map((c) => this._renderRow(c))}
         </div>
       `}
+      ${this.wake.length ? html`
+        <div class="wake-hdr">
+          WAKE SEPARATION (${this.wake.length})
+        </div>
+        <div class="list">
+          ${this.wake.map((w) => this._renderWakeRow(w))}
+        </div>
+      ` : nothing}
     `;
+  }
+
+  private _renderWakeRow(w: WakeEntry) {
+    const isRotor = w.category.startsWith('rotorcraft');
+    const cls = isRotor ? 'wake-row rotor' : 'wake-row fixed';
+    const catLabel = isRotor
+      ? 'rotor'
+      : w.category.replace('recat_', '').toUpperCase();
+    return html`
+      <div class=${cls}
+        @click=${() => this._selectWake(w)}>
+        <span class="ac">${w.lead}</span>
+        <span class="ac">${w.trail}</span>
+        <span class="wake-dist">
+          ${w.distance_nm.toFixed(1)}/${w.required_nm.toFixed(1)} NM
+        </span>
+        <span class="wake-cat">${catLabel}</span>
+      </div>
+    `;
+  }
+
+  private _selectWake(w: WakeEntry): void {
+    this.dispatchEvent(new CustomEvent('conflict-select', {
+      detail: { ac1: w.lead, ac2: w.trail },
+      bubbles: true, composed: true,
+    }));
   }
 
   private async _onMethodChange(e: Event): Promise<void> {
@@ -295,6 +421,34 @@ export class ConflictsPanel extends LitElement {
     }
   }
 
+  async loadIterative(): Promise<void> {
+    try {
+      const res = await fetch('/api/surveillance/iterative');
+      if (!res.ok) return;
+      const data = await res.json();
+      this.iterative = Boolean(data.enabled);
+    } catch {
+      // Non-fatal.
+    }
+  }
+
+  private async _onIterativeChange(e: Event): Promise<void> {
+    const enabled = (e.target as HTMLInputElement).checked;
+    this.iterative = enabled;
+    try {
+      await fetch(
+        `/api/surveillance/iterative?enabled=${enabled}`,
+        { method: 'POST' },
+      );
+      this.dispatchEvent(new CustomEvent('reso-method-changed', {
+        detail: { iterative: enabled },
+        bubbles: true, composed: true,
+      }));
+    } catch {
+      // Non-fatal.
+    }
+  }
+
   private async _onCdModeChange(e: Event): Promise<void> {
     const mode = (e.target as HTMLSelectElement).value;
     this.cdMode = mode;
@@ -318,6 +472,7 @@ export class ConflictsPanel extends LitElement {
     super.connectedCallback();
     this.loadCurrentMethod();
     this.loadCurrentCdMode();
+    this.loadIterative();
   }
 
   private _renderRow(c: ConflictEntry) {

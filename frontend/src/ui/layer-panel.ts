@@ -18,11 +18,13 @@ const LAYER_TREE: LayerGroup[] = [
   {
     id: 'traffic', label: 'Traffic', expanded: true, items: [
       { id: 'live-traffic', label: 'Live Traffic', defaultOn: false },
+      { id: 'adsb-local', label: 'ADS-B (Local Feed)', defaultOn: false },
       { id: 'replay-traffic', label: 'Replay Traffic', defaultOn: false },
       { id: 'interpolation', label: 'Interpolation', defaultOn: true },
       { id: 'trails', label: 'Trails', defaultOn: false },
       { id: 'leaders', label: 'Velocity Vectors', defaultOn: true },
       { id: 'advisories', label: 'Resolution Advisories', defaultOn: true },
+      { id: 'wake', label: 'Wake Violations', defaultOn: true },
       { id: 'formations', label: 'Formations', defaultOn: false },
       { id: 'pz', label: 'Protected Zones', defaultOn: false },
       { id: 'labels', label: 'Labels', defaultOn: true },
